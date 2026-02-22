@@ -3,6 +3,45 @@ use crate::event_registry::{extract_protocol, is_event_valid_for_mode, strip_eve
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
+use std::sync::LazyLock;
+
+// ─── Cached regexes ─────────────────────────────────────────────────────────
+
+static MODE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[a-z][a-z0-9_]*_(server|client)$").unwrap()
+});
+
+static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[a-z][a-z0-9_]*$").unwrap()
+});
+
+static ATTACK_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}$").unwrap()
+});
+
+static INDICATOR_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}-[0-9]{2,}$").unwrap()
+});
+
+static CROSS_ACTOR_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap()
+});
+
+static CEL_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap()
+});
+
+static SHORTHAND_DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[0-9]+[smhd]$").unwrap()
+});
+
+static ISO_DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$").unwrap()
+});
+
+static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[a-z][a-z0-9_]*$").unwrap()
+});
 
 /// Validate a parsed document against all 43 conformance rules (V-001..V-043).
 /// Returns a ValidationResult containing all errors and warnings found.
@@ -132,11 +171,9 @@ fn v004_required_fields(_doc: &Document, _errors: &mut Vec<ValidationError>) {
 // ─── V-005 ──────────────────────────────────────────────────────────────────
 
 fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let mode_re = Regex::new(r"^[a-z][a-z0-9_]*_(server|client)$").unwrap();
-
-    // Validate execution.mode format
+    // V-005 validates execution.mode pattern; V-036 validates actor/phase modes.
     if let Some(mode) = &doc.attack.execution.mode {
-        if !mode_re.is_match(mode) {
+        if !MODE_RE.is_match(mode) {
             errors.push(ValidationError {
                 rule: "V-005".to_string(),
                 path: "attack.execution.mode".to_string(),
@@ -148,23 +185,6 @@ fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
         }
     }
 
-    // Validate actor modes
-    if let Some(actors) = &doc.attack.execution.actors {
-        for (i, actor) in actors.iter().enumerate() {
-            if !mode_re.is_match(&actor.mode) {
-                errors.push(ValidationError {
-                    rule: "V-005".to_string(),
-                    path: format!("attack.execution.actors[{}].mode", i),
-                    message: format!(
-                        "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                        actor.mode
-                    ),
-                });
-            }
-        }
-    }
-
-    // Validate indicator surfaces are in the surface registry
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
             if lookup_surface(&ind.surface).is_none() {
@@ -431,6 +451,7 @@ fn v014_cel_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-015 ──────────────────────────────────────────────────────────────────
 
 fn v015_jsonpath_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
+    // collect_actors() already handles actors, phases, and single-phase forms
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors {
@@ -442,30 +463,6 @@ fn v015_jsonpath_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
                                 path: format!(
                                     "{}.phases[{}].extractors[{}].selector",
                                     actor_info.path_prefix, pi, ei
-                                ),
-                                message: format!(
-                                    "invalid JSONPath syntax: '{}'",
-                                    ext.selector
-                                ),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // Handle single-phase form (when phases is inline under execution)
-    if let Some(phases) = &doc.attack.execution.phases {
-        for (pi, phase) in phases.iter().enumerate() {
-            if let Some(extractors) = &phase.extractors {
-                for (ei, ext) in extractors.iter().enumerate() {
-                    if matches!(ext.extractor_type, crate::enums::ExtractorType::JsonPath) {
-                        if !is_valid_jsonpath_syntax(&ext.selector) {
-                            errors.push(ValidationError {
-                                rule: "V-015".to_string(),
-                                path: format!(
-                                    "attack.execution.phases[{}].extractors[{}].selector",
-                                    pi, ei
                                 ),
                                 message: format!(
                                     "invalid JSONPath syntax: '{}'",
@@ -633,6 +630,16 @@ fn v018_surface_protocol(
                         .mode
                         .as_deref()
                         .map(extract_protocol)
+                })
+                .or_else(|| {
+                    // Multi-actor form: infer from single actor's mode
+                    doc.attack.execution.actors.as_ref().and_then(|actors| {
+                        if actors.len() == 1 {
+                            Some(extract_protocol(&actors[0].mode))
+                        } else {
+                            None
+                        }
+                    })
                 });
             if let Some(proto) = protocol {
                 if KNOWN_PROTOCOLS.contains(&proto) {
@@ -648,7 +655,6 @@ fn v018_surface_protocol(
                             });
                         }
                     }
-                    // If surface not in registry, skip validation (unknown binding surface)
                 }
             }
         }
@@ -859,8 +865,7 @@ fn v022_semantic_threshold(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 fn v023_attack_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(id) = &doc.attack.id {
-        let re = Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}$").unwrap();
-        if !re.is_match(id) {
+        if !ATTACK_ID_RE.is_match(id) {
             errors.push(ValidationError {
                 rule: "V-023".to_string(),
                 path: "attack.id".to_string(),
@@ -880,9 +885,7 @@ fn v024_indicator_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
         for (i, ind) in indicators.iter().enumerate() {
             if let Some(ind_id) = &ind.id {
                 if let Some(attack_id) = &doc.attack.id {
-                    // Must match ^[A-Z][A-Z0-9-]*-[0-9]{3,}-[0-9]{2,}$
-                    let re = Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}-[0-9]{2,}$").unwrap();
-                    if !re.is_match(ind_id) {
+                    if !INDICATOR_ID_RE.is_match(ind_id) {
                         errors.push(ValidationError {
                             rule: "V-024".to_string(),
                             path: format!("attack.indicators[{}].id", i),
@@ -1131,7 +1134,6 @@ fn v030_mutual_exclusion(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(actors) = &doc.attack.execution.actors {
-        let name_re = Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
         let mut seen_names = std::collections::HashSet::new();
 
         for (i, actor) in actors.iter().enumerate() {
@@ -1145,7 +1147,7 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
             }
 
             // Name pattern
-            if !name_re.is_match(&actor.name) {
+            if !SNAKE_CASE_RE.is_match(&actor.name) {
                 errors.push(ValidationError {
                     rule: "V-031".to_string(),
                     path: format!("attack.execution.actors[{}].name", i),
@@ -1251,8 +1253,7 @@ fn check_cross_actor_refs_in_string(
     path: &str,
     errors: &mut Vec<ValidationError>,
 ) {
-    let re = Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap();
-    for cap in re.captures_iter(s) {
+    for cap in CROSS_ACTOR_REF_RE.captures_iter(s) {
         let actor_name = &cap[1];
         // Skip request.* and response.* references
         if actor_name == "request" || actor_name == "response" {
@@ -1532,21 +1533,10 @@ fn v036_mode_protocol_pattern(
     errors: &mut Vec<ValidationError>,
     warnings: &mut Vec<Diagnostic>,
 ) {
-    let mode_re = Regex::new(r"^[a-z][a-z0-9_]*_(server|client)$").unwrap();
-    let protocol_re = Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
-
-    // Check execution.mode
+    // execution.mode pattern is validated by V-005; V-036 handles actor/phase modes.
+    // Check for W-002 warning on execution.mode (unrecognized but valid pattern)
     if let Some(mode) = &doc.attack.execution.mode {
-        if !mode_re.is_match(mode) {
-            errors.push(ValidationError {
-                rule: "V-036".to_string(),
-                path: "attack.execution.mode".to_string(),
-                message: format!(
-                    "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                    mode
-                ),
-            });
-        } else if !KNOWN_MODES.contains(&mode.as_str()) {
+        if MODE_RE.is_match(mode) && !KNOWN_MODES.contains(&mode.as_str()) {
             warnings.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "W-002".to_string(),
@@ -1559,7 +1549,7 @@ fn v036_mode_protocol_pattern(
     // Check actor modes
     if let Some(actors) = &doc.attack.execution.actors {
         for (i, actor) in actors.iter().enumerate() {
-            if !mode_re.is_match(&actor.mode) {
+            if !MODE_RE.is_match(&actor.mode) {
                 errors.push(ValidationError {
                     rule: "V-036".to_string(),
                     path: format!("attack.execution.actors[{}].mode", i),
@@ -1583,7 +1573,7 @@ fn v036_mode_protocol_pattern(
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(mode) = &phase.mode {
-                if !mode_re.is_match(mode) {
+                if !MODE_RE.is_match(mode) {
                     errors.push(ValidationError {
                         rule: "V-036".to_string(),
                         path: format!("{}.phases[{}].mode", actor_info.path_prefix, pi),
@@ -1601,7 +1591,7 @@ fn v036_mode_protocol_pattern(
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
             if let Some(protocol) = &ind.protocol {
-                if !protocol_re.is_match(protocol) {
+                if !PROTOCOL_RE.is_match(protocol) {
                     errors.push(ValidationError {
                         rule: "V-036".to_string(),
                         path: format!("attack.indicators[{}].protocol", i),
@@ -1662,16 +1652,10 @@ pub fn is_valid_duration(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    // Shorthand: {N}s, {N}m, {N}h, {N}d
-    let shorthand_re = Regex::new(r"^[0-9]+[smhd]$").unwrap();
-    if shorthand_re.is_match(s) {
+    if SHORTHAND_DURATION_RE.is_match(s) {
         return true;
     }
-    // ISO 8601 duration
-    let iso_re = Regex::new(
-        r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$"
-    ).unwrap();
-    if iso_re.is_match(s) {
+    if ISO_DURATION_RE.is_match(s) {
         // Must have at least one component
         let has_day = s.contains('D');
         let has_time = s.contains('T') && (s.contains('H') || s.contains('M') || s.contains('S'));
@@ -1683,12 +1667,11 @@ pub fn is_valid_duration(s: &str) -> bool {
 // ─── V-039 ──────────────────────────────────────────────────────────────────
 
 fn v039_extractor_name_pattern(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let name_re = Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors {
                 for (ei, ext) in extractors.iter().enumerate() {
-                    if !name_re.is_match(&ext.name) {
+                    if !SNAKE_CASE_RE.is_match(&ext.name) {
                         errors.push(ValidationError {
                             rule: "V-039".to_string(),
                             path: format!(
@@ -1729,13 +1712,12 @@ fn v040_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) 
 // ─── V-041 ──────────────────────────────────────────────────────────────────
 
 fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let cel_id_re = Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap();
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
             if let Some(expr) = &ind.expression {
                 if let Some(vars) = &expr.variables {
                     for key in vars.keys() {
-                        if !cel_id_re.is_match(key) {
+                        if !CEL_ID_RE.is_match(key) {
                             errors.push(ValidationError {
                                 rule: "V-041".to_string(),
                                 path: format!(
@@ -1777,26 +1759,30 @@ fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>
 
 fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
-        for (_pi, phase) in actor_info.phases.iter().enumerate() {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(actions) = &phase.on_enter {
-                for (_ai, action) in actions.iter().enumerate() {
-                    if let Action::BindingSpecific { extensions, .. } = action {
-                        // The action was already parsed as binding-specific with one key.
-                        // Check if there are multiple non-x- keys — we need the raw value.
-                        // This is validated at parse time by collecting keys.
-                        // The BindingSpecific variant always has exactly one non-x- key
-                        // from our deserializer, so V-043 is satisfied.
-                        let _ = extensions;
+                for (ai, action) in actions.iter().enumerate() {
+                    let count = match action {
+                        Action::SendNotification { non_ext_key_count, .. }
+                        | Action::Log { non_ext_key_count, .. }
+                        | Action::SendElicitation { non_ext_key_count, .. }
+                        | Action::BindingSpecific { non_ext_key_count, .. } => *non_ext_key_count,
+                    };
+                    if count != 1 {
+                        errors.push(ValidationError {
+                            rule: "V-043".to_string(),
+                            path: format!(
+                                "{}.phases[{}].on_enter[{}]",
+                                actor_info.path_prefix, pi, ai
+                            ),
+                            message: format!(
+                                "action must have exactly one non-extension key, found {}",
+                                count
+                            ),
+                        });
                     }
                 }
             }
         }
     }
-    // Also check actions parsed from state values
-    check_action_keys_in_state(doc, errors);
-}
-
-fn check_action_keys_in_state(_doc: &Document, _errors: &mut Vec<ValidationError>) {
-    // Actions in on_enter are already parsed as Action enum.
-    // The Action deserializer handles V-043 constraints.
 }

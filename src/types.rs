@@ -200,11 +200,15 @@ pub enum Action {
         method: String,
         params: Option<Value>,
         extensions: HashMap<String, Value>,
+        /// Number of non-extension keys in the original object (for V-043).
+        non_ext_key_count: usize,
     },
     Log {
         message: String,
         level: Option<LogLevel>,
         extensions: HashMap<String, Value>,
+        /// Number of non-extension keys in the original object (for V-043).
+        non_ext_key_count: usize,
     },
     SendElicitation {
         message: String,
@@ -213,12 +217,16 @@ pub enum Action {
         requested_schema: Option<Value>,
         url: Option<String>,
         extensions: HashMap<String, Value>,
+        /// Number of non-extension keys in the original object (for V-043).
+        non_ext_key_count: usize,
     },
     /// Binding-specific action with a single unknown key.
     BindingSpecific {
         key: String,
         value: Value,
         extensions: HashMap<String, Value>,
+        /// Number of non-extension keys in the original object (for V-043).
+        non_ext_key_count: usize,
     },
 }
 
@@ -226,7 +234,7 @@ impl Serialize for Action {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
-            Action::SendNotification { method, params, extensions } => {
+            Action::SendNotification { method, params, extensions, .. } => {
                 let mut outer = serializer.serialize_map(None)?;
                 let mut inner = serde_json::Map::new();
                 inner.insert("method".to_string(), Value::String(method.clone()));
@@ -239,7 +247,7 @@ impl Serialize for Action {
                 }
                 outer.end()
             }
-            Action::Log { message, level, extensions } => {
+            Action::Log { message, level, extensions, .. } => {
                 let mut outer = serializer.serialize_map(None)?;
                 let mut inner = serde_json::Map::new();
                 inner.insert("message".to_string(), Value::String(message.clone()));
@@ -261,6 +269,7 @@ impl Serialize for Action {
                 requested_schema,
                 url,
                 extensions,
+                ..
             } => {
                 let mut outer = serializer.serialize_map(None)?;
                 let mut inner = serde_json::Map::new();
@@ -283,7 +292,7 @@ impl Serialize for Action {
                 }
                 outer.end()
             }
-            Action::BindingSpecific { key, value, extensions } => {
+            Action::BindingSpecific { key, value, extensions, .. } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry(key, value)?;
                 for (k, v) in extensions {
@@ -303,17 +312,17 @@ impl<'de> Deserialize<'de> for Action {
         let mut extensions = HashMap::new();
         let mut action_key = None;
         let mut action_value = None;
+        let mut non_ext_key_count = 0usize;
 
         for (k, v) in &map {
             if k.starts_with("x-") {
                 extensions.insert(k.clone(), v.clone());
-            } else if action_key.is_none() {
-                action_key = Some(k.clone());
-                action_value = Some(v.clone());
             } else {
-                // Multiple non-x- keys — store as binding specific with first key
-                // V-043 will catch this during validation
-                // For parsing, just grab the first one
+                non_ext_key_count += 1;
+                if action_key.is_none() {
+                    action_key = Some(k.clone());
+                    action_value = Some(v.clone());
+                }
             }
         }
 
@@ -332,7 +341,7 @@ impl<'de> Deserialize<'de> for Action {
                     .ok_or_else(|| serde::de::Error::custom("send_notification requires 'method'"))?
                     .to_string();
                 let params = obj.get("params").cloned();
-                Ok(Action::SendNotification { method, params, extensions })
+                Ok(Action::SendNotification { method, params, extensions, non_ext_key_count })
             }
             "log" => {
                 let obj = value
@@ -348,7 +357,7 @@ impl<'de> Deserialize<'de> for Action {
                     .map(|v| serde_json::from_value(v.clone()))
                     .transpose()
                     .map_err(serde::de::Error::custom)?;
-                Ok(Action::Log { message, level, extensions })
+                Ok(Action::Log { message, level, extensions, non_ext_key_count })
             }
             "send_elicitation" => {
                 let obj = value
@@ -372,18 +381,11 @@ impl<'de> Deserialize<'de> for Action {
                     requested_schema,
                     url,
                     extensions,
+                    non_ext_key_count,
                 })
             }
             _ => {
-                // Binding-specific action or multiple non-x- keys
-                // Collect all non-x- keys to detect V-043 violations later
-                let non_ext_keys: Vec<_> = map.keys().filter(|k| !k.starts_with("x-")).collect();
-                if non_ext_keys.len() == 1 {
-                    Ok(Action::BindingSpecific { key, value, extensions })
-                } else {
-                    // Still parse it — V-043 will catch the error
-                    Ok(Action::BindingSpecific { key, value, extensions })
-                }
+                Ok(Action::BindingSpecific { key, value, extensions, non_ext_key_count })
             }
         }
     }

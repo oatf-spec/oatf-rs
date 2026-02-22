@@ -188,15 +188,18 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
 }
 
 /// Find YAML anchor (&name) in a line, returning position if found.
+/// Requires `&` to be in value position (preceded by space, colon, dash, or at line start)
+/// to avoid false positives on URLs and other content containing `&`.
 fn find_yaml_anchor(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'&' {
             // Check if followed by a valid YAML anchor character
-            if i + 1 < bytes.len() && is_yaml_anchor_char(bytes[i + 1]) {
-                // Make sure it's not inside a URL or similar context
-                // Anchors appear after : or at start of value
+            if i + 1 < bytes.len()
+                && is_yaml_anchor_char(bytes[i + 1])
+                && (i == 0 || bytes[i - 1] == b' ' || bytes[i - 1] == b':' || bytes[i - 1] == b'-')
+            {
                 return Some(i);
             }
         }
@@ -271,11 +274,12 @@ fn strip_yaml_string_literals(line: &str) -> String {
 }
 
 /// Check for multiple YAML documents (--- separator).
+/// Only matches `---` at column 0 to avoid false positives inside block scalars.
 fn check_multi_document(input: &str) -> Result<(), ParseError> {
     let mut doc_count = 0;
     for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed == "---" {
+        // Document markers must start at column 0 per YAML spec
+        if line.starts_with("---") && line[3..].trim().is_empty() {
             doc_count += 1;
             if doc_count > 1 {
                 return Err(ParseError {
@@ -309,6 +313,6 @@ fn classify_json_error(msg: &str) -> ParseErrorKind {
     } else if lower.contains("missing field") || lower.contains("invalid type") {
         ParseErrorKind::TypeMismatch
     } else {
-        ParseErrorKind::TypeMismatch
+        ParseErrorKind::Syntax
     }
 }

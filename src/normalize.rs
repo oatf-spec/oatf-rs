@@ -306,7 +306,7 @@ fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
 fn n008_mcp_tool_defaults(doc: &mut Document) {
     if let Some(actors) = &mut doc.attack.execution.actors {
         for actor in actors.iter_mut() {
-            if !actor.mode.contains("mcp_server") {
+            if actor.mode != "mcp_server" {
                 continue;
             }
 
