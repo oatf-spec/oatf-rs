@@ -3,6 +3,7 @@
 
 pub mod enums;
 pub mod error;
+pub mod evaluate;
 pub mod event_registry;
 pub mod normalize;
 pub mod parse;
