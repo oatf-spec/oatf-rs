@@ -6,6 +6,7 @@ pub mod error;
 pub mod event_registry;
 pub mod normalize;
 pub mod parse;
+pub mod primitives;
 pub mod serialize;
 pub mod surface;
 pub mod types;
