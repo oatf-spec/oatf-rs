@@ -135,21 +135,40 @@ fn validate_conformance_suite() {
 
         // Check warnings if expected
         if let Some(expected_warnings) = &case.expected.warnings {
-            for expected in expected_warnings {
-                let found = result.warnings.iter().any(|w| {
-                    if w.code != expected.rule {
-                        return false;
-                    }
-                    match &expected.path {
-                        Some(p) => w.path.as_deref() == Some(p.as_str()),
-                        None => true, // path not specified = match on rule only
-                    }
-                });
-                if !found {
+            if expected_warnings.is_empty() {
+                // Expect no warnings — check that none are present
+                if !result.warnings.is_empty() {
                     eprintln!(
-                        "  WARN [{}] {}: expected warning {} at {:?} not found",
-                        case.id, case.name, expected.rule, expected.path
+                        "  FAIL [{}] {}: expected no warnings but got {}",
+                        case.id, case.name, result.warnings.len()
                     );
+                    for w in &result.warnings {
+                        eprintln!("    - {} {:?}: {}", w.code, w.path, w.message);
+                    }
+                    failed += 1;
+                }
+            } else {
+                for expected in expected_warnings {
+                    let found = result.warnings.iter().any(|w| {
+                        if w.code != expected.rule {
+                            return false;
+                        }
+                        match &expected.path {
+                            Some(p) => w.path.as_deref() == Some(p.as_str()),
+                            None => true,
+                        }
+                    });
+                    if !found {
+                        eprintln!(
+                            "  FAIL [{}] {}: expected warning {} at {:?} not found",
+                            case.id, case.name, expected.rule, expected.path
+                        );
+                        eprintln!("    Actual warnings:");
+                        for w in &result.warnings {
+                            eprintln!("      - {} {:?}: {}", w.code, w.path, w.message);
+                        }
+                        failed += 1;
+                    }
                 }
             }
         }
@@ -181,22 +200,99 @@ fn validate_warnings_suite() {
     let content = std::fs::read_to_string(&suite_path).unwrap();
     let cases: Vec<TestCase> = serde_saphyr::from_str(&content).unwrap();
 
+    let mut passed = 0;
+    let mut failed = 0;
+
     for case in &cases {
         let doc = match parse(&case.input) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("  FAIL [{}] {}: parse error: {}", case.id, case.name, e);
+                failed += 1;
+                continue;
+            }
         };
 
         let result = validate(&doc);
 
-        if let Some(true) = case.expected.valid {
-            assert!(
-                result.is_valid(),
-                "[{}] {}: expected valid but got errors: {:?}",
-                case.id,
-                case.name,
-                result.errors
-            );
+        // Check errors are as expected
+        if let Some(expected_errors) = &case.expected.errors {
+            if expected_errors.is_empty() {
+                if !result.is_valid() {
+                    eprintln!(
+                        "  FAIL [{}] {}: expected no errors but got {}",
+                        case.id, case.name, result.errors.len()
+                    );
+                    for err in &result.errors {
+                        eprintln!("    - {} at {}: {}", err.rule, err.path, err.message);
+                    }
+                    failed += 1;
+                    continue;
+                }
+            } else {
+                for expected in expected_errors {
+                    let found = result.errors.iter().any(|e| e.rule == expected.rule);
+                    if !found {
+                        eprintln!(
+                            "  FAIL [{}] {}: expected error {} not found",
+                            case.id, case.name, expected.rule
+                        );
+                        failed += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Check warnings
+        let mut case_ok = true;
+        if let Some(expected_warnings) = &case.expected.warnings {
+            if expected_warnings.is_empty() {
+                if !result.warnings.is_empty() {
+                    eprintln!(
+                        "  FAIL [{}] {}: expected no warnings but got {}",
+                        case.id, case.name, result.warnings.len()
+                    );
+                    for w in &result.warnings {
+                        eprintln!("    - {} {:?}: {}", w.code, w.path, w.message);
+                    }
+                    case_ok = false;
+                }
+            } else {
+                for expected in expected_warnings {
+                    let found = result.warnings.iter().any(|w| w.code == expected.rule);
+                    if !found {
+                        eprintln!(
+                            "  FAIL [{}] {}: expected warning {} not found",
+                            case.id, case.name, expected.rule
+                        );
+                        eprintln!("    Actual warnings:");
+                        for w in &result.warnings {
+                            eprintln!("      - {} {:?}: {}", w.code, w.path, w.message);
+                        }
+                        case_ok = false;
+                    }
+                }
+            }
+        }
+
+        if case_ok {
+            passed += 1;
+        } else {
+            failed += 1;
         }
     }
+
+    eprintln!(
+        "\nValidation warnings: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+
+    assert_eq!(
+        failed, 0,
+        "{} validation warning tests failed",
+        failed
+    );
 }

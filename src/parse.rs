@@ -49,7 +49,7 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
     }
 
     // Validate no unknown top-level keys (only oatf, $schema, attack allowed)
-    if let Some(obj) = value.as_object() {
+    let oatf_is_first_key = if let Some(obj) = value.as_object() {
         for key in obj.keys() {
             match key.as_str() {
                 "oatf" | "$schema" | "attack" => {}
@@ -64,10 +64,13 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
                 }
             }
         }
-    }
+        obj.keys().next().map(|k| k == "oatf").unwrap_or(false)
+    } else {
+        false
+    };
 
     // Convert serde_json::Value to Document
-    let doc: Document = serde_json::from_value(value).map_err(|e| {
+    let mut doc: Document = serde_json::from_value(value).map_err(|e| {
         let msg = e.to_string();
         ParseError {
             kind: classify_json_error(&msg),
@@ -77,6 +80,8 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
             column: None,
         }
     })?;
+
+    doc.oatf_is_first_key = oatf_is_first_key;
 
     // Validate extension fields (only x-* prefixed keys allowed)
     validate_extension_keys(&doc)?;
@@ -135,19 +140,25 @@ fn check_extensions(
 }
 
 /// Check for YAML anchors (&), aliases (*), and merge keys (<<).
+/// Tracks block scalar state to skip content inside `|` and `>` blocks.
 fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
-    for (line_num, line) in input.lines().enumerate() {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
         let trimmed = line.trim();
 
-        // Skip comments
-        if trimmed.starts_with('#') {
+        // Skip comments and empty lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            i += 1;
             continue;
         }
 
-        // Check for anchors: & followed by identifier (not inside quotes)
-        // Check for aliases: * followed by identifier (not inside quotes or glob patterns)
-        // Check for merge keys: <<
-        // We need to be careful not to match & and * inside quoted strings
+        // Check if this line introduces a block scalar (value ends with |, >, |-, |+, >-, >+)
+        if line_introduces_block_scalar(trimmed) {
+            i = skip_block_scalar(&lines, i);
+            continue;
+        }
 
         let in_content = strip_yaml_string_literals(trimmed);
 
@@ -157,7 +168,7 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML merge keys (<<) are not allowed in OATF documents".to_string(),
                 path: None,
-                line: Some(line_num + 1),
+                line: Some(i + 1),
                 column: None,
             });
         }
@@ -168,7 +179,7 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML anchors (&) are not allowed in OATF documents".to_string(),
                 path: None,
-                line: Some(line_num + 1),
+                line: Some(i + 1),
                 column: Some(pos + 1),
             });
         }
@@ -179,12 +190,152 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML aliases (*) are not allowed in OATF documents".to_string(),
                 path: None,
-                line: Some(line_num + 1),
+                line: Some(i + 1),
                 column: Some(pos + 1),
             });
         }
+
+        i += 1;
     }
     Ok(())
+}
+
+/// Check if a trimmed YAML line's value ends with a block scalar indicator.
+fn line_introduces_block_scalar(trimmed: &str) -> bool {
+    // A block scalar is introduced when a mapping value (after `:`) or sequence entry (after `- `)
+    // ends with |, >, |-, |+, >-, >+ (possibly followed by a comment).
+    // Find the value part after the colon (for mappings)
+    let value_part = if let Some(colon_pos) = find_colon_in_yaml(trimmed) {
+        trimmed[colon_pos + 1..].trim()
+    } else if trimmed.starts_with("- ") {
+        trimmed[2..].trim()
+    } else {
+        return false;
+    };
+
+    // Strip trailing comment
+    let value_no_comment = strip_trailing_comment(value_part);
+    let v = value_no_comment.trim();
+
+    matches!(v, "|" | ">" | "|-" | "|+" | ">-" | ">+")
+}
+
+/// Find the position of the key-value colon in a YAML line, skipping quoted strings.
+fn find_colon_in_yaml(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' { i += 2; continue; }
+                    if bytes[i] == b'"' { i += 1; break; }
+                    i += 1;
+                }
+            }
+            b'\'' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        i += 1;
+                        if i < bytes.len() && bytes[i] == b'\'' { i += 1; } else { break; }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b':' if i + 1 >= bytes.len() || bytes[i + 1] == b' ' || bytes[i + 1] == b'\t' => {
+                return Some(i);
+            }
+            _ => { i += 1; }
+        }
+    }
+    None
+}
+
+/// Strip trailing YAML comment (# ...) from a value, respecting quotes.
+fn strip_trailing_comment(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' { i += 2; continue; }
+                    if bytes[i] == b'"' { i += 1; break; }
+                    i += 1;
+                }
+            }
+            b'\'' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        i += 1;
+                        if i < bytes.len() && bytes[i] == b'\'' { i += 1; }
+                        else { break; }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b' ' if i + 1 < bytes.len() && bytes[i + 1] == b'#' => {
+                return &value[..i];
+            }
+            b'#' if i == 0 => {
+                return "";
+            }
+            _ => { i += 1; }
+        }
+    }
+    value
+}
+
+/// Skip all lines belonging to a block scalar starting at `start_idx`.
+/// Returns the index of the first line after the block.
+fn skip_block_scalar(lines: &[&str], start_idx: usize) -> usize {
+    // The block scalar content indent is determined by the first non-empty line after the header.
+    let mut i = start_idx + 1;
+
+    // Find the content indent from the first non-empty content line
+    let content_indent = loop {
+        if i >= lines.len() {
+            return i;
+        }
+        let line = lines[i];
+        if line.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+        // Count leading spaces
+        let indent = line.len() - line.trim_start().len();
+        break indent;
+    };
+
+    // The header line's indent level
+    let header_indent = lines[start_idx].len() - lines[start_idx].trim_start().len();
+
+    // Content must be indented more than the header
+    if content_indent <= header_indent {
+        return start_idx + 1;
+    }
+
+    // Skip all lines that are either empty or indented at content_indent or deeper
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent >= content_indent {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    i
 }
 
 /// Find YAML anchor (&name) in a line, returning position if found.

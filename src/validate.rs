@@ -49,6 +49,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
+    w001_oatf_key_ordering(doc, &mut warnings);
     v001_oatf_version(doc, &mut errors);
     v003_attack_present(doc, &mut errors);
     v004_required_fields(doc, &mut errors);
@@ -91,8 +92,15 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v042_trigger_event_or_after(doc, &mut errors);
     v043_binding_specific_action_keys(doc, &mut errors);
 
+    w004_undeclared_extractor_refs(doc, &mut warnings);
+    w005_indicator_protocol_mismatch(doc, &mut warnings);
+
     ValidationResult { errors, warnings }
 }
+
+static TEMPLATE_VAR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}").unwrap()
+});
 
 // ─── Helper: collect all phases from all execution forms ─────────────────────
 
@@ -524,6 +532,10 @@ fn is_valid_jsonpath_syntax(path: &str) -> bool {
 
 fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     // Check for unclosed {{ in template strings throughout the document
+    // Handle single-phase form directly (collect_actors returns empty for it)
+    if let Some(state) = &doc.attack.execution.state {
+        check_templates_in_value(state, "attack.execution.state", errors);
+    }
     // We check state values and on_enter action message fields
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
@@ -714,7 +726,7 @@ fn v021_target_path_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 /// Validate wildcard dot-path syntax per §5.1.2.
 /// Valid: "tools[*].description", "content[*]", "arguments", "", "status.state",
-///        "messages[0].content", "2xx-status", "0foo.bar"
+///        "2xx-status", "0foo.bar"
 /// Invalid: "tools[*.description" (missing bracket), "tools..name" (double dot),
 ///          "[*]tools" (leading bracket), "tools[*].[*]" (bracket after dot-bracket),
 ///          "tools[-1]" (negative index)
@@ -1781,6 +1793,133 @@ fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<Validation
                             ),
                         });
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─── W-001 ──────────────────────────────────────────────────────────────────
+
+fn w001_oatf_key_ordering(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    if !doc.oatf_is_first_key {
+        warnings.push(Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "W-001".to_string(),
+            path: Some("oatf".to_string()),
+            message: "oatf key should be the first key in the document".to_string(),
+        });
+    }
+}
+
+// ─── W-004 ──────────────────────────────────────────────────────────────────
+
+fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    for actor_info in collect_actors(doc) {
+        for (_pi, phase) in actor_info.phases.iter().enumerate() {
+            let declared: std::collections::HashSet<String> = phase
+                .extractors
+                .as_ref()
+                .map(|exts| exts.iter().map(|e| e.name.clone()).collect())
+                .unwrap_or_default();
+
+            let mut has_undeclared = false;
+
+            // Check state for template references
+            if let Some(state) = &phase.state {
+                has_undeclared |= check_undeclared_refs_in_value(state, &declared);
+            }
+
+            // Check on_enter actions for template references
+            if let Some(actions) = &phase.on_enter {
+                for action in actions {
+                    let action_value = serde_json::to_value(action).unwrap_or_default();
+                    has_undeclared |= check_undeclared_refs_in_value(&action_value, &declared);
+                }
+            }
+
+            if has_undeclared {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "W-004".to_string(),
+                    path: None,
+                    message: "template references undeclared extractor".to_string(),
+                });
+                return; // Emit once per document
+            }
+        }
+    }
+}
+
+fn check_undeclared_refs_in_value(
+    value: &serde_json::Value,
+    declared: &std::collections::HashSet<String>,
+) -> bool {
+    match value {
+        serde_json::Value::String(s) => {
+            for cap in TEMPLATE_VAR_RE.captures_iter(s) {
+                let var_name = &cap[1];
+                // Get the root (before any dot)
+                let root = var_name.split('.').next().unwrap_or(var_name);
+                // Skip request/response builtins
+                if root == "request" || root == "response" {
+                    continue;
+                }
+                if !declared.contains(root) {
+                    return true;
+                }
+            }
+            false
+        }
+        serde_json::Value::Array(arr) => arr.iter().any(|v| check_undeclared_refs_in_value(v, declared)),
+        serde_json::Value::Object(map) => {
+            map.values().any(|v| check_undeclared_refs_in_value(v, declared))
+        }
+        _ => false,
+    }
+}
+
+// ─── W-005 ──────────────────────────────────────────────────────────────────
+
+fn w005_indicator_protocol_mismatch(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    // Collect all protocols used by actors
+    let mut actor_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    if let Some(mode) = &doc.attack.execution.mode {
+        actor_protocols.insert(extract_protocol(mode).to_string());
+    }
+    if let Some(actors) = &doc.attack.execution.actors {
+        for actor in actors {
+            actor_protocols.insert(extract_protocol(&actor.mode).to_string());
+        }
+    }
+    // Also check phase modes
+    for actor_info in collect_actors(doc) {
+        for phase in actor_info.phases {
+            if let Some(mode) = &phase.mode {
+                actor_protocols.insert(extract_protocol(mode).to_string());
+            }
+        }
+    }
+
+    if actor_protocols.is_empty() {
+        return;
+    }
+
+    if let Some(indicators) = &doc.attack.indicators {
+        for ind in indicators {
+            if let Some(protocol) = &ind.protocol {
+                if !actor_protocols.contains(protocol.as_str()) {
+                    warnings.push(Diagnostic {
+                        severity: DiagnosticSeverity::Warning,
+                        code: "W-005".to_string(),
+                        path: None,
+                        message: format!(
+                            "indicator protocol '{}' does not match any actor protocol",
+                            protocol
+                        ),
+                    });
+                    return; // Emit once per document
                 }
             }
         }

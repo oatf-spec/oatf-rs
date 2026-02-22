@@ -13,6 +13,8 @@ pub struct Document {
     #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
     pub attack: Attack,
+    #[serde(skip)]
+    pub oatf_is_first_key: bool,
 }
 
 // ─── §2.3 Attack ─────────────────────────────────────────────────────────────
