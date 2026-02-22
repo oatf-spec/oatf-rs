@@ -566,16 +566,20 @@ pub struct PatternMatch {
 impl PatternMatch {
     /// Returns true if this pattern is in shorthand form (has direct operator keys).
     pub fn is_shorthand(&self) -> bool {
-        self.condition.is_none()
-            && (self.contains.is_some()
-                || self.starts_with.is_some()
-                || self.ends_with.is_some()
-                || self.regex.is_some()
-                || self.any_of.is_some()
-                || self.gt.is_some()
-                || self.lt.is_some()
-                || self.gte.is_some()
-                || self.lte.is_some())
+        self.condition.is_none() && self.is_shorthand_fields_present()
+    }
+
+    /// Returns true if any shorthand operator field is present.
+    pub fn is_shorthand_fields_present(&self) -> bool {
+        self.contains.is_some()
+            || self.starts_with.is_some()
+            || self.ends_with.is_some()
+            || self.regex.is_some()
+            || self.any_of.is_some()
+            || self.gt.is_some()
+            || self.lt.is_some()
+            || self.gte.is_some()
+            || self.lte.is_some()
     }
 }
 

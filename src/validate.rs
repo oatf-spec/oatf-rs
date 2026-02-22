@@ -51,8 +51,8 @@ pub fn validate(doc: &Document) -> ValidationResult {
 
     w001_oatf_key_ordering(doc, &mut warnings);
     v001_oatf_version(doc, &mut errors);
-    v003_attack_present(doc, &mut errors);
-    v004_required_fields(doc, &mut errors);
+    // V-003 (attack present) and V-004 (required fields) are enforced by
+    // serde deserialization during parse — no runtime check needed here.
     v005_enum_values(doc, &mut errors);
     v006_indicators_non_empty(doc, &mut errors);
     v007_phases_non_empty(doc, &mut errors);
@@ -61,6 +61,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v010_unique_indicator_ids(doc, &mut errors);
     v011_unique_phase_names(doc, &mut errors);
     v012_exactly_one_detection_key(doc, &mut errors);
+    v012_pattern_form_ambiguity(doc, &mut errors);
     v013_regex_valid(doc, &mut errors);
     v014_cel_valid(doc, &mut errors);
     v015_jsonpath_valid(doc, &mut errors);
@@ -160,20 +161,6 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
             ),
         });
     }
-}
-
-// ─── V-003 ──────────────────────────────────────────────────────────────────
-
-fn v003_attack_present(_doc: &Document, _errors: &mut Vec<ValidationError>) {
-    // If we got here, attack was parsed successfully (it's required in the struct).
-    // The parse step would have failed if attack was missing or wrong type.
-    // But we check if it's an object (the struct ensures this).
-}
-
-// ─── V-004 ──────────────────────────────────────────────────────────────────
-
-fn v004_required_fields(_doc: &Document, _errors: &mut Vec<ValidationError>) {
-    // execution is required on Attack struct, serde handles this during parse
 }
 
 // ─── V-005 ──────────────────────────────────────────────────────────────────
@@ -367,6 +354,23 @@ fn v012_exactly_one_detection_key(doc: &Document, errors: &mut Vec<ValidationErr
                         count
                     ),
                 });
+            }
+        }
+    }
+}
+
+/// Reject patterns that have both `condition` and shorthand operator fields.
+fn v012_pattern_form_ambiguity(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(indicators) = &doc.attack.indicators {
+        for (i, ind) in indicators.iter().enumerate() {
+            if let Some(pattern) = &ind.pattern {
+                if pattern.condition.is_some() && pattern.is_shorthand_fields_present() {
+                    errors.push(ValidationError {
+                        rule: "V-012".to_string(),
+                        path: format!("attack.indicators[{}].pattern", i),
+                        message: "pattern must not have both 'condition' and shorthand operator fields (contains, regex, etc.)".to_string(),
+                    });
+                }
             }
         }
     }
@@ -1009,10 +1013,58 @@ fn v027_match_predicate_paths(doc: &Document, errors: &mut Vec<ValidationError>)
     check_when_predicates_in_state(doc, errors);
 }
 
-fn check_when_predicates_in_state(_doc: &Document, _errors: &mut Vec<ValidationError>) {
-    // Response entries are captured in state as Value, so we'd need
-    // to inspect them as raw JSON objects. We do a best-effort scan.
-    // The conformance tests cover the key cases.
+fn check_when_predicates_in_state(doc: &Document, errors: &mut Vec<ValidationError>) {
+    // Handle single-phase form directly
+    if let Some(state) = &doc.attack.execution.state {
+        scan_when_predicates(state, "attack.execution.state", errors);
+    }
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                scan_when_predicates(
+                    state,
+                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
+                    errors,
+                );
+            }
+        }
+    }
+}
+
+/// Walk a state value looking for response entries with `when` predicates
+/// and validate that their keys are valid simple dot-paths.
+fn scan_when_predicates(value: &serde_json::Value, path: &str, errors: &mut Vec<ValidationError>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            // Check if this object has a "when" key whose value is a map (predicate)
+            if let Some(when_val) = map.get("when") {
+                if let Some(pred_map) = when_val.as_object() {
+                    for key in pred_map.keys() {
+                        if !is_valid_simple_dot_path(key) {
+                            errors.push(ValidationError {
+                                rule: "V-027".to_string(),
+                                path: format!("{}.when.{}", path, key),
+                                message: format!(
+                                    "match predicate key must be a valid simple dot-path, got '{}'",
+                                    key
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+            // Recurse into all values
+            for (k, v) in map {
+                scan_when_predicates(v, &format!("{}.{}", path, k), errors);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                scan_when_predicates(v, &format!("{}[{}]", path, i), errors);
+            }
+        }
+        _ => {}
+    }
 }
 
 // ─── V-028 ──────────────────────────────────────────────────────────────────
@@ -1642,6 +1694,7 @@ fn v037_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-038 ──────────────────────────────────────────────────────────────────
 
 fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
+    // Validate trigger.after durations
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(trigger) = &phase.trigger {
@@ -1655,6 +1708,17 @@ fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>
                     }
                 }
             }
+        }
+    }
+
+    // Validate attack.grace_period duration
+    if let Some(gp) = &doc.attack.grace_period {
+        if !is_valid_duration(gp) {
+            errors.push(ValidationError {
+                rule: "V-038".to_string(),
+                path: "attack.grace_period".to_string(),
+                message: format!("invalid duration: '{}'", gp),
+            });
         }
     }
 }
