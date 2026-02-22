@@ -1514,8 +1514,10 @@ fn check_catch_all_list(
 ) {
     let mut catch_all_count = 0;
     for entry in entries {
-        if entry.get("when").is_none() {
-            catch_all_count += 1;
+        // Absent `when` or explicit `when: null` both mean catch-all
+        match entry.get("when") {
+            None | Some(serde_json::Value::Null) => catch_all_count += 1,
+            _ => {}
         }
     }
     if catch_all_count > 1 {
@@ -1879,6 +1881,16 @@ fn w001_oatf_key_ordering(doc: &Document, warnings: &mut Vec<Diagnostic>) {
 // ─── W-004 ──────────────────────────────────────────────────────────────────
 
 fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    // Collect actor names so cross-actor references ({{actor.extractor}}) are not flagged
+    let actor_names: std::collections::HashSet<String> =
+        if let Some(actors) = &doc.attack.execution.actors {
+            actors.iter().map(|a| a.name.clone()).collect()
+        } else {
+            let mut set = std::collections::HashSet::new();
+            set.insert("default".to_string());
+            set
+        };
+
     for actor_info in collect_actors(doc) {
         for (_pi, phase) in actor_info.phases.iter().enumerate() {
             let declared: std::collections::HashSet<String> = phase
@@ -1891,14 +1903,16 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
 
             // Check state for template references
             if let Some(state) = &phase.state {
-                has_undeclared |= check_undeclared_refs_in_value(state, &declared);
+                has_undeclared |=
+                    check_undeclared_refs_in_value(state, &declared, &actor_names);
             }
 
             // Check on_enter actions for template references
             if let Some(actions) = &phase.on_enter {
                 for action in actions {
                     let action_value = serde_json::to_value(action).unwrap_or_default();
-                    has_undeclared |= check_undeclared_refs_in_value(&action_value, &declared);
+                    has_undeclared |=
+                        check_undeclared_refs_in_value(&action_value, &declared, &actor_names);
                 }
             }
 
@@ -1918,6 +1932,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
 fn check_undeclared_refs_in_value(
     value: &serde_json::Value,
     declared: &std::collections::HashSet<String>,
+    actor_names: &std::collections::HashSet<String>,
 ) -> bool {
     match value {
         serde_json::Value::String(s) => {
@@ -1925,8 +1940,8 @@ fn check_undeclared_refs_in_value(
                 let var_name = &cap[1];
                 // Get the root (before any dot)
                 let root = var_name.split('.').next().unwrap_or(var_name);
-                // Skip request/response builtins
-                if root == "request" || root == "response" {
+                // Skip request/response builtins and cross-actor references
+                if root == "request" || root == "response" || actor_names.contains(root) {
                     continue;
                 }
                 if !declared.contains(root) {
@@ -1935,9 +1950,13 @@ fn check_undeclared_refs_in_value(
             }
             false
         }
-        serde_json::Value::Array(arr) => arr.iter().any(|v| check_undeclared_refs_in_value(v, declared)),
+        serde_json::Value::Array(arr) => {
+            arr.iter()
+                .any(|v| check_undeclared_refs_in_value(v, declared, actor_names))
+        }
         serde_json::Value::Object(map) => {
-            map.values().any(|v| check_undeclared_refs_in_value(v, declared))
+            map.values()
+                .any(|v| check_undeclared_refs_in_value(v, declared, actor_names))
         }
         _ => false,
     }

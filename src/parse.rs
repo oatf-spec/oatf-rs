@@ -173,8 +173,12 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
             });
         }
 
+        // Mask plain (unquoted) scalar values so that & and * inside them
+        // are not mistaken for YAML anchors/aliases.
+        let scannable = mask_plain_scalar_values(&in_content);
+
         // Check for anchors: & at start of value position
-        if let Some(pos) = find_yaml_anchor(&in_content) {
+        if let Some(pos) = find_yaml_anchor(&scannable) {
             return Err(ParseError {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML anchors (&) are not allowed in OATF documents".to_string(),
@@ -185,7 +189,7 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
         }
 
         // Check for aliases: * at start of value position
-        if let Some(pos) = find_yaml_alias(&in_content) {
+        if let Some(pos) = find_yaml_alias(&scannable) {
             return Err(ParseError {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML aliases (*) are not allowed in OATF documents".to_string(),
@@ -198,6 +202,53 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
         i += 1;
     }
     Ok(())
+}
+
+/// Mask plain (unquoted) scalar value portions of a YAML line.
+///
+/// In a mapping line like `key: some &text`, the `&text` is part of a plain
+/// scalar value, not a YAML anchor. This function replaces the plain scalar
+/// portion after a colon with spaces so that anchor/alias detection only
+/// fires on structural YAML positions.
+///
+/// Leaves intact: anchors/aliases that appear right after `: ` or `- `
+/// (e.g., `key: &anchor value` or `key: *alias`), flow indicators (`[`, `{`),
+/// and quoted strings (already stripped by the caller).
+fn mask_plain_scalar_values(line: &str) -> String {
+    let mut result = line.to_string();
+
+    // Find the mapping value start (after colon)
+    if let Some(colon_pos) = find_colon_in_yaml(line) {
+        let after_colon = &line[colon_pos + 1..];
+        let value_start = after_colon.find(|c: char| c != ' ' && c != '\t');
+        if let Some(offset) = value_start {
+            let abs_pos = colon_pos + 1 + offset;
+            let first_char = line.as_bytes()[abs_pos];
+            // If the value starts with &, *, [, {, or is empty — keep scanning
+            // (these are structural YAML positions where anchors/aliases are valid)
+            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{' {
+                // Plain scalar value — mask it to prevent false positives
+                let mask = " ".repeat(line.len() - abs_pos);
+                result = format!("{}{}", &line[..abs_pos], mask);
+            }
+        }
+    } else if line.trim_start().starts_with("- ") {
+        // Sequence entry: `- value`
+        let trimmed = line.trim_start();
+        let prefix_len = line.len() - trimmed.len();
+        let after_dash = &trimmed[2..]; // skip "- "
+        let value_start = after_dash.find(|c: char| c != ' ' && c != '\t');
+        if let Some(offset) = value_start {
+            let abs_pos = prefix_len + 2 + offset;
+            let first_char = line.as_bytes()[abs_pos];
+            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{' {
+                let mask = " ".repeat(line.len() - abs_pos);
+                result = format!("{}{}", &line[..abs_pos], mask);
+            }
+        }
+    }
+
+    result
 }
 
 /// Check if a trimmed YAML line's value ends with a block scalar indicator.
