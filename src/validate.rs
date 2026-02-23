@@ -1870,10 +1870,7 @@ fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<Validation
                     if count != 1 {
                         errors.push(verr(
                             "V-043",
-                            format!(
-                                "{}.phases[{}].on_enter[{}]",
-                                actor_info.path_prefix, pi, ai
-                            ),
+                            format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
                             format!(
                                 "action must have exactly one non-extension key, found {}",
                                 count

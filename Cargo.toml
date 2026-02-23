@@ -10,6 +10,7 @@ homepage = "https://oatf.io"
 documentation = "https://docs.rs/oatf"
 keywords = ["security", "mcp", "a2a", "agent", "threat"]
 categories = ["parser-implementations", "data-structures"]
+exclude = ["spec/", "oatf-rs-plan.md", "fuzz/", ".github/"]
 
 [features]
 default = ["cel-eval"]

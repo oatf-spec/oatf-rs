@@ -44,7 +44,11 @@ fn parse_valid_fixtures() {
         );
         count += 1;
     }
-    assert!(count > 0, "No valid parse fixtures found in {:?}", valid_dir);
+    assert!(
+        count > 0,
+        "No valid parse fixtures found in {:?}",
+        valid_dir
+    );
 }
 
 #[test]
