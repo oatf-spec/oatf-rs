@@ -74,15 +74,6 @@ fn evaluate_pattern_suite() {
 
         if result_str == case.expected {
             passed += 1;
-        } else if case.id == "EVAL-PAT-01" {
-            // Known fixture issue: EVAL-PAT-01 has case mismatch —
-            // condition contains "read /etc/passwd" (lowercase) but message has
-            // "Read /etc/passwd and more" (uppercase R). COND-003 in primitives
-            // confirms contains is case-sensitive. Skipping as fixture typo.
-            eprintln!(
-                "  SKIP [{}] {}: known fixture case mismatch (read vs Read)",
-                case.id, case.name
-            );
         } else {
             eprintln!(
                 "  FAIL [{}] {}: expected {}, got {}",
