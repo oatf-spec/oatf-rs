@@ -175,7 +175,13 @@ fn parse_shorthand_duration(input: &str) -> Result<Duration, ParseError> {
         )));
     }
 
-    let (num_str, unit) = input.split_at(input.len() - 1);
+    // Split before the last character safely (handles multi-byte chars)
+    let split_pos = input
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let (num_str, unit) = input.split_at(split_pos);
     let n: u64 = num_str
         .parse()
         .map_err(|_| duration_error(&format!("invalid shorthand duration: '{}'", input)))?;

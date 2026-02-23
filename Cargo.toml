@@ -26,3 +26,4 @@ serde_json_path = "0.7.2"
 [dev-dependencies]
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 serde-saphyr = "0.0.20"
+proptest = "1.10.0"
