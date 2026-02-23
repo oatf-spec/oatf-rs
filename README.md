@@ -6,7 +6,7 @@
 [![crates.io](https://img.shields.io/crates/v/oatf.svg)](https://crates.io/crates/oatf)
 [![docs.rs](https://docs.rs/oatf/badge.svg)](https://docs.rs/oatf)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88.0-blue)](https://github.com/oatf-spec/oatf-rs/blob/main/Cargo.toml)
-[![License](https://img.shields.io/crates/l/oatf)](https://github.com/oatf-spec/oatf-rs/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/oatf-spec/oatf-rs/blob/main/LICENSE)
 
 Rust SDK for the [Open Agent Threat Format (OATF)](https://oatf.io).
 
