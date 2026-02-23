@@ -6,9 +6,7 @@ use std::path::PathBuf;
 fn conformance_dir() -> PathBuf {
     std::env::var("OATF_CONFORMANCE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance")
-        })
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -46,8 +44,7 @@ fn normalize_conformance_suite() {
         let normalized = normalize(doc);
 
         // Parse the expected output
-        let expected_value: serde_json::Value =
-            serde_saphyr::from_str(&case.expected).unwrap();
+        let expected_value: serde_json::Value = serde_saphyr::from_str(&case.expected).unwrap();
 
         // Convert normalized document to serde_json::Value for comparison
         let actual_value = serde_json::to_value(&normalized).unwrap();
@@ -57,8 +54,14 @@ fn normalize_conformance_suite() {
             passed += 1;
         } else {
             eprintln!("  FAIL [{}] {}", case.id, case.name);
-            eprintln!("    Expected: {}", serde_json::to_string_pretty(&expected_value).unwrap());
-            eprintln!("    Actual:   {}", serde_json::to_string_pretty(&actual_value).unwrap());
+            eprintln!(
+                "    Expected: {}",
+                serde_json::to_string_pretty(&expected_value).unwrap()
+            );
+            eprintln!(
+                "    Actual:   {}",
+                serde_json::to_string_pretty(&actual_value).unwrap()
+            );
             failed += 1;
         }
     }
@@ -70,9 +73,5 @@ fn normalize_conformance_suite() {
         cases.len()
     );
 
-    assert_eq!(
-        failed, 0,
-        "{} normalize conformance tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} normalize conformance tests failed", failed);
 }

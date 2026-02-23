@@ -1,3 +1,8 @@
+//! Document validation against conformance rules V-001 through V-045.
+//!
+//! Returns **all** errors and warnings, not just the first. Validation does not
+//! modify the document.
+
 use crate::error::*;
 use crate::event_registry::{extract_protocol, is_event_valid_for_mode, strip_event_qualifier};
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
@@ -7,41 +12,31 @@ use std::sync::LazyLock;
 
 // ─── Cached regexes ─────────────────────────────────────────────────────────
 
-static MODE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-z][a-z0-9_]*_(server|client)$").unwrap()
-});
+static MODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*_(server|client)$").unwrap());
 
-static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-z][a-z0-9_]*$").unwrap()
-});
+static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
-static ATTACK_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}$").unwrap()
-});
+static ATTACK_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}$").unwrap());
 
-static INDICATOR_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}-[0-9]{2,}$").unwrap()
-});
+static INDICATOR_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9-]*-[0-9]{3,}-[0-9]{2,}$").unwrap());
 
 static CROSS_ACTOR_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap()
 });
 
-static CEL_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap()
-});
+static CEL_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
-static SHORTHAND_DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[0-9]+[smhd]$").unwrap()
-});
+static SHORTHAND_DURATION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[0-9]+[smhd]$").unwrap());
 
-static ISO_DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$").unwrap()
-});
+static ISO_DURATION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$").unwrap());
 
-static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-z][a-z0-9_]*$").unwrap()
-});
+static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
 /// Validate a parsed document against all 45 conformance rules (V-001..V-045).
 /// Returns a ValidationResult containing all errors and warnings found.
@@ -101,9 +96,8 @@ pub fn validate(doc: &Document) -> ValidationResult {
     ValidationResult { errors, warnings }
 }
 
-static TEMPLATE_VAR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}").unwrap()
-});
+static TEMPLATE_VAR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}").unwrap());
 
 // ─── Helper: collect all phases from all execution forms ─────────────────────
 
@@ -143,7 +137,11 @@ fn collect_actors(doc: &Document) -> Vec<ActorInfo<'_>> {
     }
 }
 
-fn resolve_mode(doc: &Document, actor_mode: Option<&str>, phase_mode: Option<&str>) -> Option<String> {
+fn resolve_mode(
+    doc: &Document,
+    actor_mode: Option<&str>,
+    phase_mode: Option<&str>,
+) -> Option<String> {
     phase_mode
         .or(actor_mode)
         .or(doc.attack.execution.mode.as_deref())
@@ -157,10 +155,7 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
         errors.push(ValidationError {
             rule: "V-001".to_string(),
             path: "oatf".to_string(),
-            message: format!(
-                "oatf field must be '0.1', got '{}'",
-                doc.oatf
-            ),
+            message: format!("oatf field must be '0.1', got '{}'", doc.oatf),
         });
     }
 }
@@ -169,17 +164,17 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
     // V-005 validates execution.mode pattern; V-036 validates actor/phase modes.
-    if let Some(mode) = &doc.attack.execution.mode {
-        if !MODE_RE.is_match(mode) {
-            errors.push(ValidationError {
-                rule: "V-005".to_string(),
-                path: "attack.execution.mode".to_string(),
-                message: format!(
-                    "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                    mode
-                ),
-            });
-        }
+    if let Some(mode) = &doc.attack.execution.mode
+        && !MODE_RE.is_match(mode)
+    {
+        errors.push(ValidationError {
+            rule: "V-005".to_string(),
+            path: "attack.execution.mode".to_string(),
+            message: format!(
+                "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
+                mode
+            ),
+        });
     }
 
     if let Some(indicators) = &doc.attack.indicators {
@@ -198,14 +193,14 @@ fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-006 ──────────────────────────────────────────────────────────────────
 
 fn v006_indicators_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
-    if let Some(indicators) = &doc.attack.indicators {
-        if indicators.is_empty() {
-            errors.push(ValidationError {
-                rule: "V-006".to_string(),
-                path: "attack.indicators".to_string(),
-                message: "indicators, when present, must contain at least one entry".to_string(),
-            });
-        }
+    if let Some(indicators) = &doc.attack.indicators
+        && indicators.is_empty()
+    {
+        errors.push(ValidationError {
+            rule: "V-006".to_string(),
+            path: "attack.indicators".to_string(),
+            message: "indicators, when present, must contain at least one entry".to_string(),
+        });
     }
 }
 
@@ -213,14 +208,14 @@ fn v006_indicators_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) 
 
 fn v007_phases_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
     let exec = &doc.attack.execution;
-    if let Some(phases) = &exec.phases {
-        if phases.is_empty() {
-            errors.push(ValidationError {
-                rule: "V-007".to_string(),
-                path: "attack.execution.phases".to_string(),
-                message: "phases must contain at least one entry".to_string(),
-            });
-        }
+    if let Some(phases) = &exec.phases
+        && phases.is_empty()
+    {
+        errors.push(ValidationError {
+            rule: "V-007".to_string(),
+            path: "attack.execution.phases".to_string(),
+            message: "phases must contain at least one entry".to_string(),
+        });
     }
     if let Some(actors) = &exec.actors {
         for (i, actor) in actors.iter().enumerate() {
@@ -257,14 +252,14 @@ fn v008_terminal_phase(doc: &Document, errors: &mut Vec<ValidationError>) {
                 ),
             });
         }
-        if let Some(idx) = last_terminal_idx {
-            if idx != actor_info.phases.len() - 1 {
-                errors.push(ValidationError {
-                    rule: "V-008".to_string(),
-                    path: format!("{}.phases[{}]", actor_info.path_prefix, idx),
-                    message: "terminal phase must be the last phase in the actor's list".to_string(),
-                });
-            }
+        if let Some(idx) = last_terminal_idx
+            && idx != actor_info.phases.len() - 1
+        {
+            errors.push(ValidationError {
+                rule: "V-008".to_string(),
+                path: format!("{}.phases[{}]", actor_info.path_prefix, idx),
+                message: "terminal phase must be the last phase in the actor's list".to_string(),
+            });
         }
     }
 }
@@ -274,14 +269,15 @@ fn v008_terminal_phase(doc: &Document, errors: &mut Vec<ValidationError>) {
 fn v009_first_phase_state(doc: &Document, errors: &mut Vec<ValidationError>) {
     let exec = &doc.attack.execution;
     // Single-phase form: execution.state must be present (handled by V-030)
-    if let Some(phases) = &exec.phases {
-        if !phases.is_empty() && phases[0].state.is_none() {
-            errors.push(ValidationError {
-                rule: "V-009".to_string(),
-                path: "attack.execution.phases[0]".to_string(),
-                message: "first phase must include state".to_string(),
-            });
-        }
+    if let Some(phases) = &exec.phases
+        && !phases.is_empty()
+        && phases[0].state.is_none()
+    {
+        errors.push(ValidationError {
+            rule: "V-009".to_string(),
+            path: "attack.execution.phases[0]".to_string(),
+            message: "first phase must include state".to_string(),
+        });
     }
     if let Some(actors) = &exec.actors {
         for (i, actor) in actors.iter().enumerate() {
@@ -302,14 +298,14 @@ fn v010_unique_indicator_ids(doc: &Document, errors: &mut Vec<ValidationError>) 
     if let Some(indicators) = &doc.attack.indicators {
         let mut seen = std::collections::HashSet::new();
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(id) = &ind.id {
-                if !seen.insert(id.clone()) {
-                    errors.push(ValidationError {
-                        rule: "V-010".to_string(),
-                        path: format!("attack.indicators[{}].id", i),
-                        message: format!("duplicate indicator id: {}", id),
-                    });
-                }
+            if let Some(id) = &ind.id
+                && !seen.insert(id.clone())
+            {
+                errors.push(ValidationError {
+                    rule: "V-010".to_string(),
+                    path: format!("attack.indicators[{}].id", i),
+                    message: format!("duplicate indicator id: {}", id),
+                });
             }
         }
     }
@@ -321,14 +317,14 @@ fn v011_unique_phase_names(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         let mut seen = std::collections::HashSet::new();
         for (i, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(name) = &phase.name {
-                if !seen.insert(name.clone()) {
-                    errors.push(ValidationError {
-                        rule: "V-011".to_string(),
-                        path: format!("{}.phases[{}].name", actor_info.path_prefix, i),
-                        message: format!("duplicate phase name: {}", name),
-                    });
-                }
+            if let Some(name) = &phase.name
+                && !seen.insert(name.clone())
+            {
+                errors.push(ValidationError {
+                    rule: "V-011".to_string(),
+                    path: format!("{}.phases[{}].name", actor_info.path_prefix, i),
+                    message: format!("duplicate phase name: {}", name),
+                });
             }
         }
     }
@@ -365,14 +361,15 @@ fn v012_exactly_one_detection_key(doc: &Document, errors: &mut Vec<ValidationErr
 fn v012_pattern_form_ambiguity(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(pattern) = &ind.pattern {
-                if pattern.condition.is_some() && pattern.is_shorthand_fields_present() {
-                    errors.push(ValidationError {
+            if let Some(pattern) = &ind.pattern
+                && pattern.condition.is_some()
+                && pattern.is_shorthand_fields_present()
+            {
+                errors.push(ValidationError {
                         rule: "V-012".to_string(),
                         path: format!("attack.indicators[{}].pattern", i),
                         message: "pattern must not have both 'condition' and shorthand operator fields (contains, regex, etc.)".to_string(),
                     });
-                }
             }
         }
     }
@@ -385,26 +382,25 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
         for (i, ind) in indicators.iter().enumerate() {
             if let Some(pattern) = &ind.pattern {
                 // Check regex in shorthand form
-                if let Some(re) = &pattern.regex {
-                    if let Err(e) = Regex::new(re) {
-                        errors.push(ValidationError {
-                            rule: "V-013".to_string(),
-                            path: format!("attack.indicators[{}].pattern.regex", i),
-                            message: format!("invalid regex: {}", e),
-                        });
-                    }
+                if let Some(re) = &pattern.regex
+                    && let Err(e) = Regex::new(re)
+                {
+                    errors.push(ValidationError {
+                        rule: "V-013".to_string(),
+                        path: format!("attack.indicators[{}].pattern.regex", i),
+                        message: format!("invalid regex: {}", e),
+                    });
                 }
                 // Check regex in condition form
-                if let Some(Condition::Operators(cond)) = &pattern.condition {
-                    if let Some(re) = &cond.regex {
-                        if let Err(e) = Regex::new(re) {
-                            errors.push(ValidationError {
-                                rule: "V-013".to_string(),
-                                path: format!("attack.indicators[{}].pattern.condition.regex", i),
-                                message: format!("invalid regex: {}", e),
-                            });
-                        }
-                    }
+                if let Some(Condition::Operators(cond)) = &pattern.condition
+                    && let Some(re) = &cond.regex
+                    && let Err(e) = Regex::new(re)
+                {
+                    errors.push(ValidationError {
+                        rule: "V-013".to_string(),
+                        path: format!("attack.indicators[{}].pattern.condition.regex", i),
+                        message: format!("invalid regex: {}", e),
+                    });
                 }
             }
         }
@@ -416,23 +412,22 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
 fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger {
-                if let Some(pred) = &trigger.match_predicate {
-                    for (key, entry) in pred {
-                        if let MatchEntry::Condition(cond) = entry {
-                            if let Some(re) = &cond.regex {
-                                if let Err(e) = Regex::new(re) {
-                                    errors.push(ValidationError {
-                                        rule: "V-013".to_string(),
-                                        path: format!(
-                                            "{}.phases[{}].trigger.match.{}.regex",
-                                            actor_info.path_prefix, pi, key
-                                        ),
-                                        message: format!("invalid regex: {}", e),
-                                    });
-                                }
-                            }
-                        }
+            if let Some(trigger) = &phase.trigger
+                && let Some(pred) = &trigger.match_predicate
+            {
+                for (key, entry) in pred {
+                    if let MatchEntry::Condition(cond) = entry
+                        && let Some(re) = &cond.regex
+                        && let Err(e) = Regex::new(re)
+                    {
+                        errors.push(ValidationError {
+                            rule: "V-013".to_string(),
+                            path: format!(
+                                "{}.phases[{}].trigger.match.{}.regex",
+                                actor_info.path_prefix, pi, key
+                            ),
+                            message: format!("invalid regex: {}", e),
+                        });
                     }
                 }
             }
@@ -470,20 +465,17 @@ fn v015_jsonpath_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors {
                 for (ei, ext) in extractors.iter().enumerate() {
-                    if matches!(ext.extractor_type, crate::enums::ExtractorType::JsonPath) {
-                        if !is_valid_jsonpath_syntax(&ext.selector) {
-                            errors.push(ValidationError {
-                                rule: "V-015".to_string(),
-                                path: format!(
-                                    "{}.phases[{}].extractors[{}].selector",
-                                    actor_info.path_prefix, pi, ei
-                                ),
-                                message: format!(
-                                    "invalid JSONPath syntax: '{}'",
-                                    ext.selector
-                                ),
-                            });
-                        }
+                    if matches!(ext.extractor_type, crate::enums::ExtractorType::JsonPath)
+                        && !is_valid_jsonpath_syntax(&ext.selector)
+                    {
+                        errors.push(ValidationError {
+                            rule: "V-015".to_string(),
+                            path: format!(
+                                "{}.phases[{}].extractors[{}].selector",
+                                actor_info.path_prefix, pi, ei
+                            ),
+                            message: format!("invalid JSONPath syntax: '{}'", ext.selector),
+                        });
                     }
                 }
             }
@@ -556,7 +548,11 @@ fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-fn check_templates_in_value(value: &serde_json::Value, path: &str, errors: &mut Vec<ValidationError>) {
+fn check_templates_in_value(
+    value: &serde_json::Value,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
     match value {
         serde_json::Value::String(s) => {
             check_template_string(s, path, errors);
@@ -613,20 +609,18 @@ fn check_template_string(s: &str, path: &str, errors: &mut Vec<ValidationError>)
 // ─── V-017 ──────────────────────────────────────────────────────────────────
 
 fn v017_severity_confidence(doc: &Document, errors: &mut Vec<ValidationError>) {
-    if let Some(severity) = &doc.attack.severity {
-        if let Severity::Object {
+    if let Some(severity) = &doc.attack.severity
+        && let Severity::Object {
             confidence: Some(c),
             ..
         } = severity
-        {
-            if *c < 0 || *c > 100 {
-                errors.push(ValidationError {
-                    rule: "V-017".to_string(),
-                    path: "attack.severity.confidence".to_string(),
-                    message: format!("severity.confidence must be 0-100, got {}", c),
-                });
-            }
-        }
+        && (*c < 0 || *c > 100)
+    {
+        errors.push(ValidationError {
+            rule: "V-017".to_string(),
+            path: "attack.severity.confidence".to_string(),
+            message: format!("severity.confidence must be 0-100, got {}", c),
+        });
     }
 }
 
@@ -642,13 +636,7 @@ fn v018_surface_protocol(
             let protocol = ind
                 .protocol
                 .as_deref()
-                .or_else(|| {
-                    doc.attack
-                        .execution
-                        .mode
-                        .as_deref()
-                        .map(extract_protocol)
-                })
+                .or_else(|| doc.attack.execution.mode.as_deref().map(extract_protocol))
                 .or_else(|| {
                     // Multi-actor form: infer from single actor's mode
                     doc.attack.execution.actors.as_ref().and_then(|actors| {
@@ -659,21 +647,19 @@ fn v018_surface_protocol(
                         }
                     })
                 });
-            if let Some(proto) = protocol {
-                if KNOWN_PROTOCOLS.contains(&proto) {
-                    if let Some(entry) = lookup_surface(&ind.surface) {
-                        if entry.protocol != proto {
-                            errors.push(ValidationError {
-                                rule: "V-018".to_string(),
-                                path: format!("attack.indicators[{}].surface", i),
-                                message: format!(
-                                    "surface '{}' is for protocol '{}', but indicator targets '{}'",
-                                    ind.surface, entry.protocol, proto
-                                ),
-                            });
-                        }
-                    }
-                }
+            if let Some(proto) = protocol
+                && KNOWN_PROTOCOLS.contains(&proto)
+                && let Some(entry) = lookup_surface(&ind.surface)
+                && entry.protocol != proto
+            {
+                errors.push(ValidationError {
+                    rule: "V-018".to_string(),
+                    path: format!("attack.indicators[{}].surface", i),
+                    message: format!(
+                        "surface '{}' is for protocol '{}', but indicator targets '{}'",
+                        ind.surface, entry.protocol, proto
+                    ),
+                });
             }
         }
     }
@@ -684,16 +670,16 @@ fn v018_surface_protocol(
 fn v019_count_match_require_event(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger {
-                if trigger.event.is_none() {
-                    if trigger.count.is_some() || trigger.match_predicate.is_some() {
-                        errors.push(ValidationError {
-                            rule: "V-019".to_string(),
-                            path: format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
-                            message: "trigger.count and trigger.match require event to be present".to_string(),
-                        });
-                    }
-                }
+            if let Some(trigger) = &phase.trigger
+                && trigger.event.is_none()
+                && (trigger.count.is_some() || trigger.match_predicate.is_some())
+            {
+                errors.push(ValidationError {
+                    rule: "V-019".to_string(),
+                    path: format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
+                    message: "trigger.count and trigger.match require event to be present"
+                        .to_string(),
+                });
             }
         }
     }
@@ -704,38 +690,38 @@ fn v019_count_match_require_event(doc: &Document, errors: &mut Vec<ValidationErr
 fn v021_target_path_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(pattern) = &ind.pattern {
-                if let Some(target) = &pattern.target {
-                    if !is_valid_wildcard_dot_path(target) {
-                        errors.push(ValidationError {
-                            rule: "V-021".to_string(),
-                            path: format!("attack.indicators[{}].pattern.target", i),
-                            message: format!("invalid wildcard dot-path: '{}'", target),
-                        });
-                    }
-                }
+            if let Some(pattern) = &ind.pattern
+                && let Some(target) = &pattern.target
+                && !is_valid_wildcard_dot_path(target)
+            {
+                errors.push(ValidationError {
+                    rule: "V-021".to_string(),
+                    path: format!("attack.indicators[{}].pattern.target", i),
+                    message: format!("invalid wildcard dot-path: '{}'", target),
+                });
             }
-            if let Some(semantic) = &ind.semantic {
-                if let Some(target) = &semantic.target {
-                    if !is_valid_wildcard_dot_path(target) {
-                        errors.push(ValidationError {
-                            rule: "V-021".to_string(),
-                            path: format!("attack.indicators[{}].semantic.target", i),
-                            message: format!("invalid wildcard dot-path: '{}'", target),
-                        });
-                    }
-                }
+            if let Some(semantic) = &ind.semantic
+                && let Some(target) = &semantic.target
+                && !is_valid_wildcard_dot_path(target)
+            {
+                errors.push(ValidationError {
+                    rule: "V-021".to_string(),
+                    path: format!("attack.indicators[{}].semantic.target", i),
+                    message: format!("invalid wildcard dot-path: '{}'", target),
+                });
             }
         }
     }
 }
 
 /// Validate wildcard dot-path syntax per §5.1.2.
-/// Valid: "tools[*].description", "content[*]", "arguments", "", "status.state",
-///        "2xx-status", "0foo.bar"
-/// Invalid: "tools[*.description" (missing bracket), "tools..name" (double dot),
-///          "[*]tools" (leading bracket), "tools[*].[*]" (bracket after dot-bracket),
-///          "tools[-1]" (negative index)
+///
+/// Valid: `tools[*].description`, `content[*]`, `arguments`, `""`, `status.state`,
+///        `2xx-status`, `0foo.bar`
+///
+/// Invalid: `tools[*.description` (missing bracket), `tools..name` (double dot),
+///          `[*]tools` (leading bracket), `tools[*].[*]` (bracket after dot-bracket),
+///          `tools[-1]` (negative index)
 pub fn is_valid_wildcard_dot_path(path: &str) -> bool {
     if path.is_empty() {
         return true; // Empty string targets root
@@ -823,10 +809,10 @@ fn split_wildcard_path(path: &str) -> Option<Vec<String>> {
     }
 
     // Validate that the path doesn't start with [
-    if let Some(first) = segments.first() {
-        if first.starts_with('[') {
-            return None;
-        }
+    if let Some(first) = segments.first()
+        && first.starts_with('[')
+    {
+        return None;
     }
 
     Some(segments)
@@ -852,7 +838,10 @@ pub fn is_valid_simple_dot_path(path: &str) -> bool {
             return false; // double dot or leading/trailing dot
         }
         // Each segment must be alphanumeric, underscores, hyphens
-        if !seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if !seg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return false;
         }
     }
@@ -864,16 +853,18 @@ pub fn is_valid_simple_dot_path(path: &str) -> bool {
 fn v022_semantic_threshold(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(semantic) = &ind.semantic {
-                if let Some(threshold) = semantic.threshold {
-                    if !(0.0..=1.0).contains(&threshold) {
-                        errors.push(ValidationError {
-                            rule: "V-022".to_string(),
-                            path: format!("attack.indicators[{}].semantic.threshold", i),
-                            message: format!("semantic threshold must be in [0.0, 1.0], got {}", threshold),
-                        });
-                    }
-                }
+            if let Some(semantic) = &ind.semantic
+                && let Some(threshold) = semantic.threshold
+                && !(0.0..=1.0).contains(&threshold)
+            {
+                errors.push(ValidationError {
+                    rule: "V-022".to_string(),
+                    path: format!("attack.indicators[{}].semantic.threshold", i),
+                    message: format!(
+                        "semantic threshold must be in [0.0, 1.0], got {}",
+                        threshold
+                    ),
+                });
             }
         }
     }
@@ -882,17 +873,17 @@ fn v022_semantic_threshold(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-023 ──────────────────────────────────────────────────────────────────
 
 fn v023_attack_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
-    if let Some(id) = &doc.attack.id {
-        if !ATTACK_ID_RE.is_match(id) {
-            errors.push(ValidationError {
-                rule: "V-023".to_string(),
-                path: "attack.id".to_string(),
-                message: format!(
-                    "attack.id must match ^[A-Z][A-Z0-9-]*-[0-9]{{3,}}$, got '{}'",
-                    id
-                ),
-            });
-        }
+    if let Some(id) = &doc.attack.id
+        && !ATTACK_ID_RE.is_match(id)
+    {
+        errors.push(ValidationError {
+            rule: "V-023".to_string(),
+            path: "attack.id".to_string(),
+            message: format!(
+                "attack.id must match ^[A-Z][A-Z0-9-]*-[0-9]{{3,}}$, got '{}'",
+                id
+            ),
+        });
     }
 }
 
@@ -901,10 +892,11 @@ fn v023_attack_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
 fn v024_indicator_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(ind_id) = &ind.id {
-                if let Some(attack_id) = &doc.attack.id {
-                    if !INDICATOR_ID_RE.is_match(ind_id) {
-                        errors.push(ValidationError {
+            if let Some(ind_id) = &ind.id
+                && let Some(attack_id) = &doc.attack.id
+            {
+                if !INDICATOR_ID_RE.is_match(ind_id) {
+                    errors.push(ValidationError {
                             rule: "V-024".to_string(),
                             path: format!("attack.indicators[{}].id", i),
                             message: format!(
@@ -912,26 +904,25 @@ fn v024_indicator_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
                                 ind_id
                             ),
                         });
-                    } else {
-                        // Prefix must equal attack.id
-                        // The prefix is everything before the final -NN segment
-                        if let Some(last_dash) = ind_id.rfind('-') {
-                            let prefix = &ind_id[..last_dash];
-                            if prefix != attack_id {
-                                errors.push(ValidationError {
-                                    rule: "V-024".to_string(),
-                                    path: format!("attack.indicators[{}].id", i),
-                                    message: format!(
-                                        "indicator.id prefix '{}' must equal attack.id '{}'",
-                                        prefix, attack_id
-                                    ),
-                                });
-                            }
+                } else {
+                    // Prefix must equal attack.id
+                    // The prefix is everything before the final -NN segment
+                    if let Some(last_dash) = ind_id.rfind('-') {
+                        let prefix = &ind_id[..last_dash];
+                        if prefix != attack_id {
+                            errors.push(ValidationError {
+                                rule: "V-024".to_string(),
+                                path: format!("attack.indicators[{}].id", i),
+                                message: format!(
+                                    "indicator.id prefix '{}' must equal attack.id '{}'",
+                                    prefix, attack_id
+                                ),
+                            });
                         }
                     }
                 }
-                // When attack.id is absent, indicator IDs are accepted without pattern constraints
             }
+            // When attack.id is absent, indicator IDs are accepted without pattern constraints
         }
     }
 }
@@ -941,14 +932,14 @@ fn v024_indicator_id_format(doc: &Document, errors: &mut Vec<ValidationError>) {
 fn v025_indicator_confidence(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(conf) = ind.confidence {
-                if conf < 0 || conf > 100 {
-                    errors.push(ValidationError {
-                        rule: "V-025".to_string(),
-                        path: format!("attack.indicators[{}].confidence", i),
-                        message: format!("indicator.confidence must be 0-100, got {}", conf),
-                    });
-                }
+            if let Some(conf) = ind.confidence
+                && (!(0..=100).contains(&conf))
+            {
+                errors.push(ValidationError {
+                    rule: "V-025".to_string(),
+                    path: format!("attack.indicators[{}].confidence", i),
+                    message: format!("indicator.confidence must be 0-100, got {}", conf),
+                });
             }
         }
     }
@@ -959,11 +950,12 @@ fn v025_indicator_confidence(doc: &Document, errors: &mut Vec<ValidationError>) 
 fn v026_expression_variables_paths(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(expr) = &ind.expression {
-                if let Some(vars) = &expr.variables {
-                    for (key, path) in vars {
-                        if !is_valid_simple_dot_path(path) {
-                            errors.push(ValidationError {
+            if let Some(expr) = &ind.expression
+                && let Some(vars) = &expr.variables
+            {
+                for (key, path) in vars {
+                    if !is_valid_simple_dot_path(path) {
+                        errors.push(ValidationError {
                                 rule: "V-026".to_string(),
                                 path: format!(
                                     "attack.indicators[{}].expression.variables.{}",
@@ -974,7 +966,6 @@ fn v026_expression_variables_paths(doc: &Document, errors: &mut Vec<ValidationEr
                                     path
                                 ),
                             });
-                        }
                     }
                 }
             }
@@ -988,22 +979,22 @@ fn v027_match_predicate_paths(doc: &Document, errors: &mut Vec<ValidationError>)
     // Check trigger.match keys
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger {
-                if let Some(pred) = &trigger.match_predicate {
-                    for key in pred.keys() {
-                        if !is_valid_simple_dot_path(key) {
-                            errors.push(ValidationError {
-                                rule: "V-027".to_string(),
-                                path: format!(
-                                    "{}.phases[{}].trigger.match.{}",
-                                    actor_info.path_prefix, pi, key
-                                ),
-                                message: format!(
-                                    "match predicate key must be a valid simple dot-path, got '{}'",
-                                    key
-                                ),
-                            });
-                        }
+            if let Some(trigger) = &phase.trigger
+                && let Some(pred) = &trigger.match_predicate
+            {
+                for key in pred.keys() {
+                    if !is_valid_simple_dot_path(key) {
+                        errors.push(ValidationError {
+                            rule: "V-027".to_string(),
+                            path: format!(
+                                "{}.phases[{}].trigger.match.{}",
+                                actor_info.path_prefix, pi, key
+                            ),
+                            message: format!(
+                                "match predicate key must be a valid simple dot-path, got '{}'",
+                                key
+                            ),
+                        });
                     }
                 }
             }
@@ -1039,19 +1030,19 @@ fn scan_when_predicates(value: &serde_json::Value, path: &str, errors: &mut Vec<
     match value {
         serde_json::Value::Object(map) => {
             // Check if this object has a "when" key whose value is a map (predicate)
-            if let Some(when_val) = map.get("when") {
-                if let Some(pred_map) = when_val.as_object() {
-                    for key in pred_map.keys() {
-                        if !is_valid_simple_dot_path(key) {
-                            errors.push(ValidationError {
-                                rule: "V-027".to_string(),
-                                path: format!("{}.when.{}", path, key),
-                                message: format!(
-                                    "match predicate key must be a valid simple dot-path, got '{}'",
-                                    key
-                                ),
-                            });
-                        }
+            if let Some(when_val) = map.get("when")
+                && let Some(pred_map) = when_val.as_object()
+            {
+                for key in pred_map.keys() {
+                    if !is_valid_simple_dot_path(key) {
+                        errors.push(ValidationError {
+                            rule: "V-027".to_string(),
+                            path: format!("{}.when.{}", path, key),
+                            message: format!(
+                                "match predicate key must be a valid simple dot-path, got '{}'",
+                                key
+                            ),
+                        });
                     }
                 }
             }
@@ -1075,32 +1066,33 @@ fn v028_conditional_requiredness(doc: &Document, errors: &mut Vec<ValidationErro
     let exec = &doc.attack.execution;
 
     // When execution.mode is absent and execution.actors is absent (mode-less multi-phase form)
-    if exec.mode.is_none() && exec.actors.is_none() {
-        if let Some(phases) = &exec.phases {
-            for (i, phase) in phases.iter().enumerate() {
-                if phase.mode.is_none() {
-                    errors.push(ValidationError {
-                        rule: "V-028".to_string(),
-                        path: format!("attack.execution.phases[{}].mode", i),
-                        message: "phase.mode is required when execution.mode is absent".to_string(),
-                    });
-                }
+    if exec.mode.is_none()
+        && exec.actors.is_none()
+        && let Some(phases) = &exec.phases
+    {
+        for (i, phase) in phases.iter().enumerate() {
+            if phase.mode.is_none() {
+                errors.push(ValidationError {
+                    rule: "V-028".to_string(),
+                    path: format!("attack.execution.phases[{}].mode", i),
+                    message: "phase.mode is required when execution.mode is absent".to_string(),
+                });
             }
         }
     }
 
     // When execution.mode is absent — indicators must specify protocol
-    if exec.mode.is_none() {
-        if let Some(indicators) = &doc.attack.indicators {
-            for (i, ind) in indicators.iter().enumerate() {
-                if ind.protocol.is_none() {
-                    errors.push(ValidationError {
-                        rule: "V-028".to_string(),
-                        path: format!("attack.indicators[{}].protocol", i),
-                        message: "indicator.protocol is required when execution.mode is absent"
-                            .to_string(),
-                    });
-                }
+    if exec.mode.is_none()
+        && let Some(indicators) = &doc.attack.indicators
+    {
+        for (i, ind) in indicators.iter().enumerate() {
+            if ind.protocol.is_none() {
+                errors.push(ValidationError {
+                    rule: "V-028".to_string(),
+                    path: format!("attack.indicators[{}].protocol", i),
+                    message: "indicator.protocol is required when execution.mode is absent"
+                        .to_string(),
+                });
             }
         }
     }
@@ -1125,35 +1117,29 @@ fn v029_event_mode_validity(
         }
 
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            let resolved_mode = phase
-                .mode
-                .as_deref()
-                .unwrap_or(mode);
+            let resolved_mode = phase.mode.as_deref().unwrap_or(mode);
 
             if !KNOWN_MODES.contains(&resolved_mode) {
                 continue;
             }
 
-            if let Some(trigger) = &phase.trigger {
-                if let Some(event) = &trigger.event {
-                    let base_event = strip_event_qualifier(event);
-                    if let Some(valid) = is_event_valid_for_mode(base_event, resolved_mode) {
-                        if !valid {
-                            errors.push(ValidationError {
-                                rule: "V-029".to_string(),
-                                path: format!(
-                                    "{}.phases[{}].trigger.event",
-                                    actor_info.path_prefix, pi
-                                ),
-                                message: format!(
-                                    "event '{}' is not valid for mode '{}'",
-                                    event, resolved_mode
-                                ),
-                            });
-                        }
-                    }
-                    // If event not in registry, skip (unrecognized binding event)
+            if let Some(trigger) = &phase.trigger
+                && let Some(event) = &trigger.event
+            {
+                let base_event = strip_event_qualifier(event);
+                if let Some(valid) = is_event_valid_for_mode(base_event, resolved_mode)
+                    && !valid
+                {
+                    errors.push(ValidationError {
+                        rule: "V-029".to_string(),
+                        path: format!("{}.phases[{}].trigger.event", actor_info.path_prefix, pi),
+                        message: format!(
+                            "event '{}' is not valid for mode '{}'",
+                            event, resolved_mode
+                        ),
+                    });
                 }
+                // If event not in registry, skip (unrecognized binding event)
             }
         }
     }
@@ -1245,17 +1231,17 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
             // Phase names unique within actor
             let mut phase_names = std::collections::HashSet::new();
             for (pi, phase) in actor.phases.iter().enumerate() {
-                if let Some(name) = &phase.name {
-                    if !phase_names.insert(name.clone()) {
-                        errors.push(ValidationError {
-                            rule: "V-031".to_string(),
-                            path: format!("attack.execution.actors[{}].phases[{}].name", i, pi),
-                            message: format!(
-                                "duplicate phase name '{}' within actor '{}'",
-                                name, actor.name
-                            ),
-                        });
-                    }
+                if let Some(name) = &phase.name
+                    && !phase_names.insert(name.clone())
+                {
+                    errors.push(ValidationError {
+                        rule: "V-031".to_string(),
+                        path: format!("attack.execution.actors[{}].phases[{}].name", i, pi),
+                        message: format!(
+                            "duplicate phase name '{}' within actor '{}'",
+                            name, actor.name
+                        ),
+                    });
                 }
             }
         }
@@ -1265,14 +1251,15 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
 // ─── V-032 ──────────────────────────────────────────────────────────────────
 
 fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let actor_names: std::collections::HashSet<String> = if let Some(actors) = &doc.attack.execution.actors {
-        actors.iter().map(|a| a.name.clone()).collect()
-    } else {
-        // After normalization, single-phase/multi-phase have actor "default"
-        let mut set = std::collections::HashSet::new();
-        set.insert("default".to_string());
-        set
-    };
+    let actor_names: std::collections::HashSet<String> =
+        if let Some(actors) = &doc.attack.execution.actors {
+            actors.iter().map(|a| a.name.clone()).collect()
+        } else {
+            // After normalization, single-phase/multi-phase have actor "default"
+            let mut set = std::collections::HashSet::new();
+            set.insert("default".to_string());
+            set
+        };
 
     // Scan all template strings in the document for {{actor_name.extractor_name}} references
     for actor_info in collect_actors(doc) {
@@ -1301,7 +1288,12 @@ fn check_cross_actor_refs_in_value(
         }
         serde_json::Value::Array(arr) => {
             for (i, v) in arr.iter().enumerate() {
-                check_cross_actor_refs_in_value(v, actor_names, &format!("{}[{}]", path, i), errors);
+                check_cross_actor_refs_in_value(
+                    v,
+                    actor_names,
+                    &format!("{}[{}]", path, i),
+                    errors,
+                );
             }
         }
         serde_json::Value::Object(map) => {
@@ -1390,7 +1382,8 @@ fn check_response_exclusivity(
                             errors.push(ValidationError {
                                 rule: "V-033".to_string(),
                                 path: format!("{}.tools[{}].responses[{}]", path, ti, ri),
-                                message: "content and synthesize are mutually exclusive".to_string(),
+                                message: "content and synthesize are mutually exclusive"
+                                    .to_string(),
                             });
                         }
                     }
@@ -1409,7 +1402,8 @@ fn check_response_exclusivity(
                             errors.push(ValidationError {
                                 rule: "V-033".to_string(),
                                 path: format!("{}.prompts[{}].responses[{}]", path, pi, ri),
-                                message: "messages and synthesize are mutually exclusive".to_string(),
+                                message: "messages and synthesize are mutually exclusive"
+                                    .to_string(),
                             });
                         }
                     }
@@ -1500,11 +1494,7 @@ fn check_catch_all_in_state(
 
         // A2A task_responses
         if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
-            check_catch_all_list(
-                task_responses,
-                &format!("{}.task_responses", path),
-                errors,
-            );
+            check_catch_all_list(task_responses, &format!("{}.task_responses", path), errors);
         }
     }
 }
@@ -1558,25 +1548,25 @@ fn check_synthesize_prompts(
 ) {
     match value {
         serde_json::Value::Object(map) => {
-            if let Some(synth) = map.get("synthesize") {
-                if let Some(synth_obj) = synth.as_object() {
-                    match synth_obj.get("prompt") {
-                        Some(serde_json::Value::String(s)) if s.is_empty() => {
-                            errors.push(ValidationError {
-                                rule: "V-035".to_string(),
-                                path: format!("{}.synthesize.prompt", path),
-                                message: "synthesize.prompt must be non-empty".to_string(),
-                            });
-                        }
-                        None => {
-                            errors.push(ValidationError {
-                                rule: "V-035".to_string(),
-                                path: format!("{}.synthesize.prompt", path),
-                                message: "synthesize.prompt must be present".to_string(),
-                            });
-                        }
-                        _ => {}
+            if let Some(synth) = map.get("synthesize")
+                && let Some(synth_obj) = synth.as_object()
+            {
+                match synth_obj.get("prompt") {
+                    Some(serde_json::Value::String(s)) if s.is_empty() => {
+                        errors.push(ValidationError {
+                            rule: "V-035".to_string(),
+                            path: format!("{}.synthesize.prompt", path),
+                            message: "synthesize.prompt must be non-empty".to_string(),
+                        });
                     }
+                    None => {
+                        errors.push(ValidationError {
+                            rule: "V-035".to_string(),
+                            path: format!("{}.synthesize.prompt", path),
+                            message: "synthesize.prompt must be present".to_string(),
+                        });
+                    }
+                    _ => {}
                 }
             }
             for (k, v) in map {
@@ -1603,15 +1593,16 @@ fn v036_mode_protocol_pattern(
 ) {
     // execution.mode pattern is validated by V-005; V-036 handles actor/phase modes.
     // Check for W-002 warning on execution.mode (unrecognized but valid pattern)
-    if let Some(mode) = &doc.attack.execution.mode {
-        if MODE_RE.is_match(mode) && !KNOWN_MODES.contains(&mode.as_str()) {
-            warnings.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "W-002".to_string(),
-                path: Some("attack.execution.mode".to_string()),
-                message: format!("unrecognized mode: '{}'", mode),
-            });
-        }
+    if let Some(mode) = &doc.attack.execution.mode
+        && MODE_RE.is_match(mode)
+        && !KNOWN_MODES.contains(&mode.as_str())
+    {
+        warnings.push(Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "W-002".to_string(),
+            path: Some("attack.execution.mode".to_string()),
+            message: format!("unrecognized mode: '{}'", mode),
+        });
     }
 
     // Check actor modes
@@ -1640,17 +1631,17 @@ fn v036_mode_protocol_pattern(
     // Check phase modes
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(mode) = &phase.mode {
-                if !MODE_RE.is_match(mode) {
-                    errors.push(ValidationError {
-                        rule: "V-036".to_string(),
-                        path: format!("{}.phases[{}].mode", actor_info.path_prefix, pi),
-                        message: format!(
-                            "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                            mode
-                        ),
-                    });
-                }
+            if let Some(mode) = &phase.mode
+                && !MODE_RE.is_match(mode)
+            {
+                errors.push(ValidationError {
+                    rule: "V-036".to_string(),
+                    path: format!("{}.phases[{}].mode", actor_info.path_prefix, pi),
+                    message: format!(
+                        "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
+                        mode
+                    ),
+                });
             }
         }
     }
@@ -1663,10 +1654,7 @@ fn v036_mode_protocol_pattern(
                     errors.push(ValidationError {
                         rule: "V-036".to_string(),
                         path: format!("attack.indicators[{}].protocol", i),
-                        message: format!(
-                            "protocol must match [a-z][a-z0-9_]*, got '{}'",
-                            protocol
-                        ),
+                        message: format!("protocol must match [a-z][a-z0-9_]*, got '{}'", protocol),
                     });
                 } else if !KNOWN_PROTOCOLS.contains(&protocol.as_str()) {
                     warnings.push(Diagnostic {
@@ -1684,14 +1672,17 @@ fn v036_mode_protocol_pattern(
 // ─── V-037 ──────────────────────────────────────────────────────────────────
 
 fn v037_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
-    if let Some(version) = doc.attack.version {
-        if version < 1 {
-            errors.push(ValidationError {
-                rule: "V-037".to_string(),
-                path: "attack.version".to_string(),
-                message: format!("attack.version must be a positive integer (>= 1), got {}", version),
-            });
-        }
+    if let Some(version) = doc.attack.version
+        && version < 1
+    {
+        errors.push(ValidationError {
+            rule: "V-037".to_string(),
+            path: "attack.version".to_string(),
+            message: format!(
+                "attack.version must be a positive integer (>= 1), got {}",
+                version
+            ),
+        });
     }
 }
 
@@ -1701,29 +1692,28 @@ fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>
     // Validate trigger.after durations
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger {
-                if let Some(after) = &trigger.after {
-                    if !is_valid_duration(after) {
-                        errors.push(ValidationError {
-                            rule: "V-038".to_string(),
-                            path: format!("{}.phases[{}].trigger.after", actor_info.path_prefix, pi),
-                            message: format!("invalid duration: '{}'", after),
-                        });
-                    }
-                }
+            if let Some(trigger) = &phase.trigger
+                && let Some(after) = &trigger.after
+                && !is_valid_duration(after)
+            {
+                errors.push(ValidationError {
+                    rule: "V-038".to_string(),
+                    path: format!("{}.phases[{}].trigger.after", actor_info.path_prefix, pi),
+                    message: format!("invalid duration: '{}'", after),
+                });
             }
         }
     }
 
     // Validate attack.grace_period duration
-    if let Some(gp) = &doc.attack.grace_period {
-        if !is_valid_duration(gp) {
-            errors.push(ValidationError {
-                rule: "V-038".to_string(),
-                path: "attack.grace_period".to_string(),
-                message: format!("invalid duration: '{}'", gp),
-            });
-        }
+    if let Some(gp) = &doc.attack.grace_period
+        && !is_valid_duration(gp)
+    {
+        errors.push(ValidationError {
+            rule: "V-038".to_string(),
+            path: "attack.grace_period".to_string(),
+            message: format!("invalid duration: '{}'", gp),
+        });
     }
 }
 
@@ -1780,15 +1770,15 @@ fn v039_extractor_name_pattern(doc: &Document, errors: &mut Vec<ValidationError>
 fn v040_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(extractors) = &phase.extractors {
-                if extractors.is_empty() {
-                    errors.push(ValidationError {
-                        rule: "V-040".to_string(),
-                        path: format!("{}.phases[{}].extractors", actor_info.path_prefix, pi),
-                        message: "extractors, when present, must contain at least one entry"
-                            .to_string(),
-                    });
-                }
+            if let Some(extractors) = &phase.extractors
+                && extractors.is_empty()
+            {
+                errors.push(ValidationError {
+                    rule: "V-040".to_string(),
+                    path: format!("{}.phases[{}].extractors", actor_info.path_prefix, pi),
+                    message: "extractors, when present, must contain at least one entry"
+                        .to_string(),
+                });
             }
         }
     }
@@ -1799,22 +1789,19 @@ fn v040_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) 
 fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(expr) = &ind.expression {
-                if let Some(vars) = &expr.variables {
-                    for key in vars.keys() {
-                        if !CEL_ID_RE.is_match(key) {
-                            errors.push(ValidationError {
-                                rule: "V-041".to_string(),
-                                path: format!(
-                                    "attack.indicators[{}].expression.variables.{}",
-                                    i, key
-                                ),
-                                message: format!(
-                                    "expression variable key must be a valid CEL identifier, got '{}'",
-                                    key
-                                ),
-                            });
-                        }
+            if let Some(expr) = &ind.expression
+                && let Some(vars) = &expr.variables
+            {
+                for key in vars.keys() {
+                    if !CEL_ID_RE.is_match(key) {
+                        errors.push(ValidationError {
+                            rule: "V-041".to_string(),
+                            path: format!("attack.indicators[{}].expression.variables.{}", i, key),
+                            message: format!(
+                                "expression variable key must be a valid CEL identifier, got '{}'",
+                                key
+                            ),
+                        });
                     }
                 }
             }
@@ -1827,14 +1814,15 @@ fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationErro
 fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger {
-                if trigger.event.is_none() && trigger.after.is_none() {
-                    errors.push(ValidationError {
-                        rule: "V-042".to_string(),
-                        path: format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
-                        message: "trigger must specify at least one of event or after".to_string(),
-                    });
-                }
+            if let Some(trigger) = &phase.trigger
+                && trigger.event.is_none()
+                && trigger.after.is_none()
+            {
+                errors.push(ValidationError {
+                    rule: "V-042".to_string(),
+                    path: format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
+                    message: "trigger must specify at least one of event or after".to_string(),
+                });
             }
         }
     }
@@ -1848,10 +1836,18 @@ fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<Validation
             if let Some(actions) = &phase.on_enter {
                 for (ai, action) in actions.iter().enumerate() {
                     let count = match action {
-                        Action::SendNotification { non_ext_key_count, .. }
-                        | Action::Log { non_ext_key_count, .. }
-                        | Action::SendElicitation { non_ext_key_count, .. }
-                        | Action::BindingSpecific { non_ext_key_count, .. } => *non_ext_key_count,
+                        Action::SendNotification {
+                            non_ext_key_count, ..
+                        }
+                        | Action::Log {
+                            non_ext_key_count, ..
+                        }
+                        | Action::SendElicitation {
+                            non_ext_key_count, ..
+                        }
+                        | Action::BindingSpecific {
+                            non_ext_key_count, ..
+                        } => *non_ext_key_count,
                     };
                     if count != 1 {
                         errors.push(ValidationError {
@@ -1920,17 +1916,14 @@ fn has_capture_group(pattern: &str) -> bool {
 fn v045_on_enter_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(actions) = &phase.on_enter {
-                if actions.is_empty() {
-                    errors.push(ValidationError {
-                        rule: "V-045".to_string(),
-                        path: format!(
-                            "{}.phases[{}].on_enter",
-                            actor_info.path_prefix, pi
-                        ),
-                        message: "on_enter, when present, must contain at least one action".to_string(),
-                    });
-                }
+            if let Some(actions) = &phase.on_enter
+                && actions.is_empty()
+            {
+                errors.push(ValidationError {
+                    rule: "V-045".to_string(),
+                    path: format!("{}.phases[{}].on_enter", actor_info.path_prefix, pi),
+                    message: "on_enter, when present, must contain at least one action".to_string(),
+                });
             }
         }
     }
@@ -1963,7 +1956,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
         };
 
     for actor_info in collect_actors(doc) {
-        for (_pi, phase) in actor_info.phases.iter().enumerate() {
+        for phase in actor_info.phases.iter() {
             let declared: std::collections::HashSet<String> = phase
                 .extractors
                 .as_ref()
@@ -1974,8 +1967,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
 
             // Check state for template references
             if let Some(state) = &phase.state {
-                has_undeclared |=
-                    check_undeclared_refs_in_value(state, &declared, &actor_names);
+                has_undeclared |= check_undeclared_refs_in_value(state, &declared, &actor_names);
             }
 
             // Check on_enter actions for template references
@@ -2021,14 +2013,12 @@ fn check_undeclared_refs_in_value(
             }
             false
         }
-        serde_json::Value::Array(arr) => {
-            arr.iter()
-                .any(|v| check_undeclared_refs_in_value(v, declared, actor_names))
-        }
-        serde_json::Value::Object(map) => {
-            map.values()
-                .any(|v| check_undeclared_refs_in_value(v, declared, actor_names))
-        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
         _ => false,
     }
 }
@@ -2062,19 +2052,19 @@ fn w005_indicator_protocol_mismatch(doc: &Document, warnings: &mut Vec<Diagnosti
 
     if let Some(indicators) = &doc.attack.indicators {
         for ind in indicators {
-            if let Some(protocol) = &ind.protocol {
-                if !actor_protocols.contains(protocol.as_str()) {
-                    warnings.push(Diagnostic {
-                        severity: DiagnosticSeverity::Warning,
-                        code: "W-005".to_string(),
-                        path: None,
-                        message: format!(
-                            "indicator protocol '{}' does not match any actor protocol",
-                            protocol
-                        ),
-                    });
-                    return; // Emit once per document
-                }
+            if let Some(protocol) = &ind.protocol
+                && !actor_protocols.contains(protocol.as_str())
+            {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "W-005".to_string(),
+                    path: None,
+                    message: format!(
+                        "indicator protocol '{}' does not match any actor protocol",
+                        protocol
+                    ),
+                });
+                return; // Emit once per document
             }
         }
     }

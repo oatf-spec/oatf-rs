@@ -1,3 +1,8 @@
+//! Idempotent document normalization (N-001 through N-008).
+//!
+//! Converts all execution forms to canonical multi-actor form, expands defaults,
+//! and resolves shorthand patterns. `normalize(normalize(doc)) == normalize(doc)`.
+
 use crate::enums::*;
 use crate::event_registry::extract_protocol;
 use crate::surface::lookup_surface;
@@ -57,10 +62,7 @@ fn n001_defaults(doc: &mut Document) {
     // severity.confidence → 50 (when severity is present)
     if let Some(ref mut severity) = attack.severity {
         match severity {
-            Severity::Object {
-                confidence: c,
-                ..
-            } => {
+            Severity::Object { confidence: c, .. } => {
                 if c.is_none() {
                     *c = Some(50);
                 }
@@ -81,10 +83,11 @@ fn n001_defaults(doc: &mut Document) {
                 }
 
                 // trigger.count → 1 (when event present and count absent)
-                if let Some(ref mut trigger) = phase.trigger {
-                    if trigger.event.is_some() && trigger.count.is_none() {
-                        trigger.count = Some(1);
-                    }
+                if let Some(ref mut trigger) = phase.trigger
+                    && trigger.event.is_some()
+                    && trigger.count.is_none()
+                {
+                    trigger.count = Some(1);
                 }
             }
         }
@@ -101,25 +104,21 @@ fn n001_defaults(doc: &mut Document) {
 
         // In multi-actor form after normalization, we may not have execution.mode
         // If actors exist, check for a single default actor
-        let actor_protocol = attack
-            .execution
-            .actors
-            .as_ref()
-            .and_then(|actors| {
-                if actors.len() == 1 {
-                    Some(extract_protocol(&actors[0].mode).to_string())
-                } else {
-                    None
-                }
-            });
+        let actor_protocol = attack.execution.actors.as_ref().and_then(|actors| {
+            if actors.len() == 1 {
+                Some(extract_protocol(&actors[0].mode).to_string())
+            } else {
+                None
+            }
+        });
 
         let default_protocol = exec_protocol.or(actor_protocol);
 
         for ind in indicators.iter_mut() {
-            if ind.protocol.is_none() {
-                if let Some(ref proto) = default_protocol {
-                    ind.protocol = Some(proto.clone());
-                }
+            if ind.protocol.is_none()
+                && let Some(ref proto) = default_protocol
+            {
+                ind.protocol = Some(proto.clone());
             }
         }
     }
@@ -130,20 +129,20 @@ fn n001_defaults(doc: &mut Document) {
             attack.correlation = Some(Correlation {
                 logic: Some(CorrelationLogic::Any),
             });
-        } else if let Some(ref mut corr) = attack.correlation {
-            if corr.logic.is_none() {
-                corr.logic = Some(CorrelationLogic::Any);
-            }
+        } else if let Some(ref mut corr) = attack.correlation
+            && corr.logic.is_none()
+        {
+            corr.logic = Some(CorrelationLogic::Any);
         }
     }
 
     // mapping.relationship → "primary"
-    if let Some(ref mut classification) = attack.classification {
-        if let Some(ref mut mappings) = classification.mappings {
-            for mapping in mappings.iter_mut() {
-                if mapping.relationship.is_none() {
-                    mapping.relationship = Some(Relationship::Primary);
-                }
+    if let Some(ref mut classification) = attack.classification
+        && let Some(ref mut mappings) = classification.mappings
+    {
+        for mapping in mappings.iter_mut() {
+            if mapping.relationship.is_none() {
+                mapping.relationship = Some(Relationship::Primary);
             }
         }
     }
@@ -160,7 +159,10 @@ fn n002_severity_expansion(doc: &mut Document) {
                     confidence: Some(50),
                 });
             }
-            Severity::Object { confidence: None, level } => {
+            Severity::Object {
+                confidence: None,
+                level,
+            } => {
                 doc.attack.severity = Some(Severity::Object {
                     level: level.clone(),
                     confidence: Some(50),
@@ -195,20 +197,18 @@ fn n004_resolve_targets(doc: &mut Document) {
         for ind in indicators.iter_mut() {
             let surface_entry = lookup_surface(&ind.surface);
 
-            if let Some(ref mut pattern) = ind.pattern {
-                if pattern.target.is_none() {
-                    if let Some(entry) = surface_entry {
-                        pattern.target = Some(entry.default_target.to_string());
-                    }
-                }
+            if let Some(ref mut pattern) = ind.pattern
+                && pattern.target.is_none()
+                && let Some(entry) = surface_entry
+            {
+                pattern.target = Some(entry.default_target.to_string());
             }
 
-            if let Some(ref mut semantic) = ind.semantic {
-                if semantic.target.is_none() {
-                    if let Some(entry) = surface_entry {
-                        semantic.target = Some(entry.default_target.to_string());
-                    }
-                }
+            if let Some(ref mut semantic) = ind.semantic
+                && semantic.target.is_none()
+                && let Some(entry) = surface_entry
+            {
+                semantic.target = Some(entry.default_target.to_string());
             }
         }
     }
@@ -219,23 +219,23 @@ fn n004_resolve_targets(doc: &mut Document) {
 fn n005_expand_pattern_shorthand(doc: &mut Document) {
     if let Some(indicators) = &mut doc.attack.indicators {
         for ind in indicators.iter_mut() {
-            if let Some(ref mut pattern) = ind.pattern {
-                if pattern.is_shorthand() {
-                    // Build a MatchCondition from the shorthand fields
-                    let cond = MatchCondition {
-                        contains: pattern.contains.take(),
-                        starts_with: pattern.starts_with.take(),
-                        ends_with: pattern.ends_with.take(),
-                        regex: pattern.regex.take(),
-                        any_of: pattern.any_of.take(),
-                        gt: pattern.gt.take(),
-                        lt: pattern.lt.take(),
-                        gte: pattern.gte.take(),
-                        lte: pattern.lte.take(),
-                        exists: None,
-                    };
-                    pattern.condition = Some(Condition::Operators(cond));
-                }
+            if let Some(ref mut pattern) = ind.pattern
+                && pattern.is_shorthand()
+            {
+                // Build a MatchCondition from the shorthand fields
+                let cond = MatchCondition {
+                    contains: pattern.contains.take(),
+                    starts_with: pattern.starts_with.take(),
+                    ends_with: pattern.ends_with.take(),
+                    regex: pattern.regex.take(),
+                    any_of: pattern.any_of.take(),
+                    gt: pattern.gt.take(),
+                    lt: pattern.lt.take(),
+                    gte: pattern.gte.take(),
+                    lte: pattern.lte.take(),
+                    exists: None,
+                };
+                pattern.condition = Some(Condition::Operators(cond));
             }
         }
     }
@@ -320,26 +320,25 @@ fn n008_mcp_tool_defaults(doc: &mut Document) {
 }
 
 fn apply_mcp_tool_defaults(state: &mut serde_json::Value) {
-    if let Some(obj) = state.as_object_mut() {
-        if let Some(tools) = obj.get_mut("tools") {
-            if let Some(tools_arr) = tools.as_array_mut() {
-                for tool in tools_arr.iter_mut() {
-                    if let Some(tool_obj) = tool.as_object_mut() {
-                        // inputSchema defaults to {"type": "object"}
-                        if !tool_obj.contains_key("inputSchema") {
-                            tool_obj.insert(
-                                "inputSchema".to_string(),
-                                serde_json::json!({"type": "object"}),
-                            );
-                        }
-                        // description defaults to ""
-                        if !tool_obj.contains_key("description") {
-                            tool_obj.insert(
-                                "description".to_string(),
-                                serde_json::Value::String(String::new()),
-                            );
-                        }
-                    }
+    if let Some(obj) = state.as_object_mut()
+        && let Some(tools) = obj.get_mut("tools")
+        && let Some(tools_arr) = tools.as_array_mut()
+    {
+        for tool in tools_arr.iter_mut() {
+            if let Some(tool_obj) = tool.as_object_mut() {
+                // inputSchema defaults to {"type": "object"}
+                if !tool_obj.contains_key("inputSchema") {
+                    tool_obj.insert(
+                        "inputSchema".to_string(),
+                        serde_json::json!({"type": "object"}),
+                    );
+                }
+                // description defaults to ""
+                if !tool_obj.contains_key("description") {
+                    tool_obj.insert(
+                        "description".to_string(),
+                        serde_json::Value::String(String::new()),
+                    );
                 }
             }
         }

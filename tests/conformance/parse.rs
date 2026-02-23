@@ -5,9 +5,7 @@ use std::path::PathBuf;
 fn conformance_dir() -> PathBuf {
     std::env::var("OATF_CONFORMANCE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance")
-        })
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
 #[test]
@@ -24,7 +22,13 @@ fn parse_valid_fixtures() {
         if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
             continue;
         }
-        if path.file_name().unwrap().to_str().unwrap().contains(".meta.") {
+        if path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains(".meta.")
+        {
             continue;
         }
 
@@ -53,7 +57,13 @@ fn parse_invalid_fixtures() {
         if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
             continue;
         }
-        if path.file_name().unwrap().to_str().unwrap().contains(".meta.") {
+        if path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains(".meta.")
+        {
             continue;
         }
 

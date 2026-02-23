@@ -1,3 +1,5 @@
+//! [`Document`] → YAML serialization.
+
 use crate::error::SerializeError;
 use crate::types::Document;
 

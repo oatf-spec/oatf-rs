@@ -1,3 +1,8 @@
+//! Closed enumerations used throughout the OATF type system.
+//!
+//! These are "closed" enums — only the defined variants are valid. Open enums
+//! (mode, protocol) are represented as strings and validated by regex pattern.
+
 use serde::{Deserialize, Serialize};
 
 /// Severity classification.

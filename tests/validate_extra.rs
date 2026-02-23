@@ -138,7 +138,11 @@ attack:
         threshold: 0.8
 "#;
     let errs = errors_for(input, "V-022");
-    assert!(errs.is_empty(), "valid threshold should not error: {:?}", errs);
+    assert!(
+        errs.is_empty(),
+        "valid threshold should not error: {:?}",
+        errs
+    );
 }
 
 // ─── V-023: Attack ID format ────────────────────────────────────────────────
@@ -159,7 +163,11 @@ attack:
         contains: "test"
 "#;
     let errs = errors_for(input, "V-023");
-    assert!(errs.is_empty(), "valid attack ID should not error: {:?}", errs);
+    assert!(
+        errs.is_empty(),
+        "valid attack ID should not error: {:?}",
+        errs
+    );
 }
 
 // ─── V-024: Indicator ID format ─────────────────────────────────────────────
@@ -180,7 +188,11 @@ attack:
         contains: "test"
 "#;
     let errs = errors_for(input, "V-024");
-    assert!(errs.is_empty(), "valid indicator ID should not error: {:?}", errs);
+    assert!(
+        errs.is_empty(),
+        "valid indicator ID should not error: {:?}",
+        errs
+    );
 }
 
 // ─── V-025: Indicator confidence range ──────────────────────────────────────
@@ -346,7 +358,11 @@ attack:
         contains: "test"
 "#;
     let errs = errors_for(input, "V-038");
-    assert!(errs.is_empty(), "valid duration should not error: {:?}", errs);
+    assert!(
+        errs.is_empty(),
+        "valid duration should not error: {:?}",
+        errs
+    );
 }
 
 #[test]
@@ -400,7 +416,11 @@ attack:
         contains: "test"
 "#;
     let errs = errors_for(input, "V-039");
-    assert!(errs.is_empty(), "valid extractor name should not error: {:?}", errs);
+    assert!(
+        errs.is_empty(),
+        "valid extractor name should not error: {:?}",
+        errs
+    );
 }
 
 // ─── V-040: Extractors non-empty ────────────────────────────────────────────

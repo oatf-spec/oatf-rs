@@ -145,8 +145,10 @@ fn json_to_cel(value: &Value) -> cel::Value {
             cel::Value::List(Arc::new(items))
         }
         Value::Object(map) => {
-            let entries: HashMap<String, cel::Value> =
-                map.iter().map(|(k, v)| (k.clone(), json_to_cel(v))).collect();
+            let entries: HashMap<String, cel::Value> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_cel(v)))
+                .collect();
             entries.into()
         }
     }
@@ -263,10 +265,7 @@ pub fn evaluate_indicator(
     cel_evaluator: Option<&dyn CelEvaluator>,
     semantic_evaluator: Option<&dyn SemanticEvaluator>,
 ) -> IndicatorVerdict {
-    let indicator_id = indicator
-        .id
-        .clone()
-        .unwrap_or_default();
+    let indicator_id = indicator.id.clone().unwrap_or_default();
 
     if let Some(ref pattern) = indicator.pattern {
         // Pattern dispatch
@@ -337,12 +336,7 @@ pub fn evaluate_indicator(
                 evidence: Some("Semantic evaluator not available".to_string()),
                 source: None,
             },
-            Some(sem_eval) => evaluate_semantic(
-                semantic,
-                message,
-                sem_eval,
-                &indicator_id,
-            ),
+            Some(sem_eval) => evaluate_semantic(semantic, message, sem_eval, &indicator_id),
         }
     } else {
         // No detection key present

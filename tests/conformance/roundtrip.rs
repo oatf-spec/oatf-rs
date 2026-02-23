@@ -7,9 +7,7 @@ use std::path::PathBuf;
 fn conformance_dir() -> PathBuf {
     std::env::var("OATF_CONFORMANCE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance")
-        })
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -49,7 +47,10 @@ fn roundtrip_conformance_suite() {
         let doc1 = match parse(&case.input) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("  FAIL [{}] {}: initial parse error: {}", case.id, case.name, e);
+                eprintln!(
+                    "  FAIL [{}] {}: initial parse error: {}",
+                    case.id, case.name, e
+                );
                 failed += 1;
                 continue;
             }
@@ -105,9 +106,5 @@ fn roundtrip_conformance_suite() {
         cases.len()
     );
 
-    assert_eq!(
-        failed, 0,
-        "{} round-trip conformance tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} round-trip conformance tests failed", failed);
 }

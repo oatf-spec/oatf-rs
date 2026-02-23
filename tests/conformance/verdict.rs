@@ -60,7 +60,10 @@ fn run_verdict_suite(filename: &str) {
             "any" => CorrelationLogic::Any,
             "all" => CorrelationLogic::All,
             other => {
-                eprintln!("  SKIP [{}] {}: unknown logic: {}", case.id, case.name, other);
+                eprintln!(
+                    "  SKIP [{}] {}: unknown logic: {}",
+                    case.id, case.name, other
+                );
                 continue;
             }
         };
@@ -107,9 +110,7 @@ fn run_verdict_suite(filename: &str) {
                 extensions: HashMap::new(),
             },
             indicators: Some(indicators),
-            correlation: Some(Correlation {
-                logic: Some(logic),
-            }),
+            correlation: Some(Correlation { logic: Some(logic) }),
             extensions: HashMap::new(),
         };
 
@@ -156,7 +157,10 @@ fn run_verdict_suite(filename: &str) {
         } else {
             eprintln!(
                 "  FAIL [{}] {}: expected {}, got {} (summary: matched={}, not_matched={}, error={}, skipped={})",
-                case.id, case.name, case.expected.result, result_str,
+                case.id,
+                case.name,
+                case.expected.result,
+                result_str,
                 verdict.evaluation_summary.matched,
                 verdict.evaluation_summary.not_matched,
                 verdict.evaluation_summary.error,
@@ -173,11 +177,7 @@ fn run_verdict_suite(filename: &str) {
         failed,
         cases.len()
     );
-    assert_eq!(
-        failed, 0,
-        "{} verdict/{} tests failed",
-        failed, filename
-    );
+    assert_eq!(failed, 0, "{} verdict/{} tests failed", failed, filename);
 }
 
 #[test]

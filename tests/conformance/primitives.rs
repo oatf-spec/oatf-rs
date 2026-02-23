@@ -49,14 +49,20 @@ fn resolve_simple_path_suite() {
         {
             let found = case.expected["found"].as_bool().unwrap_or(false);
             if found {
-                result.as_ref().map(|v| *v == case.expected["value"]).unwrap_or(false)
+                result
+                    .as_ref()
+                    .map(|v| *v == case.expected["value"])
+                    .unwrap_or(false)
             } else {
                 result.is_none()
             }
         } else if case.expected.is_null() {
             result.is_none()
         } else {
-            result.as_ref().map(|v| *v == case.expected).unwrap_or(false)
+            result
+                .as_ref()
+                .map(|v| *v == case.expected)
+                .unwrap_or(false)
         };
 
         if matches {
@@ -72,7 +78,9 @@ fn resolve_simple_path_suite() {
 
     eprintln!(
         "\nresolve_simple_path: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} resolve_simple_path tests failed", failed);
 }
@@ -128,7 +136,9 @@ fn resolve_wildcard_path_suite() {
 
     eprintln!(
         "\nresolve_wildcard_path: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} resolve_wildcard_path tests failed", failed);
 }
@@ -174,7 +184,9 @@ fn parse_duration_suite() {
             } else {
                 eprintln!(
                     "  FAIL [{}] {}: expected error, got {:?}",
-                    case.id, case.name, result.unwrap()
+                    case.id,
+                    case.name,
+                    result.unwrap()
                 );
                 failed += 1;
             }
@@ -186,13 +198,19 @@ fn parse_duration_suite() {
                     } else {
                         eprintln!(
                             "  FAIL [{}] {}: expected {}s, got {}s",
-                            case.id, case.name, expected_secs, dur.as_secs()
+                            case.id,
+                            case.name,
+                            expected_secs,
+                            dur.as_secs()
                         );
                         failed += 1;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  FAIL [{}] {}: expected {}s, got error: {}", case.id, case.name, expected_secs, e);
+                    eprintln!(
+                        "  FAIL [{}] {}: expected {}s, got error: {}",
+                        case.id, case.name, expected_secs, e
+                    );
                     failed += 1;
                 }
             }
@@ -201,7 +219,9 @@ fn parse_duration_suite() {
 
     eprintln!(
         "\nparse_duration: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} parse_duration tests failed", failed);
 }
@@ -253,7 +273,9 @@ fn evaluate_condition_suite() {
 
     eprintln!(
         "\nevaluate_condition: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} evaluate_condition tests failed", failed);
 }
@@ -311,7 +333,9 @@ fn evaluate_predicate_suite() {
 
     eprintln!(
         "\nevaluate_predicate: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} evaluate_predicate tests failed", failed);
 }
@@ -333,8 +357,16 @@ fn parse_match_entry(value: &Value) -> MatchEntry {
     match value {
         Value::Object(map) => {
             let operator_keys = [
-                "contains", "starts_with", "ends_with", "regex", "any_of",
-                "gt", "lt", "gte", "lte", "exists",
+                "contains",
+                "starts_with",
+                "ends_with",
+                "regex",
+                "any_of",
+                "gt",
+                "lt",
+                "gte",
+                "lte",
+                "exists",
             ];
             if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
                 let cond: MatchCondition = serde_json::from_value(value.clone()).unwrap();
@@ -403,7 +435,9 @@ fn interpolate_template_suite() {
 
     eprintln!(
         "\ninterpolate_template: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} interpolate_template tests failed", failed);
 }
@@ -452,7 +486,10 @@ fn evaluate_extractor_suite() {
             "json_path" => oatf::enums::ExtractorType::JsonPath,
             "regex" => oatf::enums::ExtractorType::Regex,
             other => {
-                eprintln!("  SKIP [{}] {}: unknown extractor type: {}", case.id, case.name, other);
+                eprintln!(
+                    "  SKIP [{}] {}: unknown extractor type: {}",
+                    case.id, case.name, other
+                );
                 continue;
             }
         };
@@ -460,7 +497,10 @@ fn evaluate_extractor_suite() {
             "request" => oatf::enums::ExtractorSource::Request,
             "response" => oatf::enums::ExtractorSource::Response,
             other => {
-                eprintln!("  SKIP [{}] {}: unknown source: {}", case.id, case.name, other);
+                eprintln!(
+                    "  SKIP [{}] {}: unknown source: {}",
+                    case.id, case.name, other
+                );
                 continue;
             }
         };
@@ -487,7 +527,9 @@ fn evaluate_extractor_suite() {
 
     eprintln!(
         "\nevaluate_extractor: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
     assert_eq!(failed, 0, "{} evaluate_extractor tests failed", failed);
 }
@@ -519,7 +561,10 @@ struct PhaseInput {
 fn compute_effective_state_suite() {
     let path = conformance_dir().join("primitives/compute-effective-state.yaml");
     if !path.exists() {
-        eprintln!("Skipping compute_effective_state tests: {:?} not found", path);
+        eprintln!(
+            "Skipping compute_effective_state tests: {:?} not found",
+            path
+        );
         return;
     }
 
@@ -562,11 +607,9 @@ fn compute_effective_state_suite() {
 
     eprintln!(
         "\ncompute_effective_state: {} passed, {} failed out of {} total",
-        passed, failed, cases.len()
+        passed,
+        failed,
+        cases.len()
     );
-    assert_eq!(
-        failed, 0,
-        "{} compute_effective_state tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} compute_effective_state tests failed", failed);
 }

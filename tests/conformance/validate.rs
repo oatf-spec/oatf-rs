@@ -5,9 +5,7 @@ use std::path::PathBuf;
 fn conformance_dir() -> PathBuf {
     std::env::var("OATF_CONFORMANCE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance")
-        })
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
 /// A single validation test case from the suite.
@@ -93,6 +91,12 @@ fn validate_conformance_suite() {
             }
         } else if let Some(expected_errors) = &case.expected.errors {
             if result.errors.is_empty() {
+                // V-014 CEL syntax validation requires the cel-eval feature
+                #[cfg(not(feature = "cel-eval"))]
+                if expected_errors.iter().any(|e| e.rule == "V-014") {
+                    skipped += 1;
+                    continue;
+                }
                 eprintln!(
                     "  FAIL [{}] {}: expected errors but got valid",
                     case.id, case.name
@@ -140,7 +144,9 @@ fn validate_conformance_suite() {
                 if !result.warnings.is_empty() {
                     eprintln!(
                         "  FAIL [{}] {}: expected no warnings but got {}",
-                        case.id, case.name, result.warnings.len()
+                        case.id,
+                        case.name,
+                        result.warnings.len()
                     );
                     for w in &result.warnings {
                         eprintln!("    - {} {:?}: {}", w.code, w.path, w.message);
@@ -182,18 +188,17 @@ fn validate_conformance_suite() {
         cases.len()
     );
 
-    assert_eq!(
-        failed, 0,
-        "{} validation conformance tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} validation conformance tests failed", failed);
 }
 
 #[test]
 fn validate_warnings_suite() {
     let suite_path = conformance_dir().join("validate/warnings.yaml");
     if !suite_path.exists() {
-        eprintln!("Skipping validate warnings tests: {:?} not found", suite_path);
+        eprintln!(
+            "Skipping validate warnings tests: {:?} not found",
+            suite_path
+        );
         return;
     }
 
@@ -221,7 +226,9 @@ fn validate_warnings_suite() {
                 if !result.is_valid() {
                     eprintln!(
                         "  FAIL [{}] {}: expected no errors but got {}",
-                        case.id, case.name, result.errors.len()
+                        case.id,
+                        case.name,
+                        result.errors.len()
                     );
                     for err in &result.errors {
                         eprintln!("    - {} at {}: {}", err.rule, err.path, err.message);
@@ -251,7 +258,9 @@ fn validate_warnings_suite() {
                 if !result.warnings.is_empty() {
                     eprintln!(
                         "  FAIL [{}] {}: expected no warnings but got {}",
-                        case.id, case.name, result.warnings.len()
+                        case.id,
+                        case.name,
+                        result.warnings.len()
                     );
                     for w in &result.warnings {
                         eprintln!("    - {} {:?}: {}", w.code, w.path, w.message);
@@ -290,9 +299,5 @@ fn validate_warnings_suite() {
         cases.len()
     );
 
-    assert_eq!(
-        failed, 0,
-        "{} validation warning tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} validation warning tests failed", failed);
 }

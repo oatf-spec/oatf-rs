@@ -1,3 +1,5 @@
+//! Error and diagnostic types for parse, validation, evaluation, and serialization.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

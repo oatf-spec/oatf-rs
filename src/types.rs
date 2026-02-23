@@ -1,3 +1,8 @@
+//! OATF document types per the format specification §2.
+//!
+//! All struct fields follow the specification naming. Extension fields (`x-*` prefixed)
+//! are captured via `#[serde(flatten)] HashMap<String, Value>` on types that support them.
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -74,7 +79,10 @@ pub struct Correlation {
 #[derive(Clone, Debug)]
 pub enum Severity {
     Scalar(SeverityLevel),
-    Object { level: SeverityLevel, confidence: Option<i64> },
+    Object {
+        level: SeverityLevel,
+        confidence: Option<i64>,
+    },
 }
 
 impl Serialize for Severity {
@@ -236,7 +244,12 @@ impl Serialize for Action {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
-            Action::SendNotification { method, params, extensions, .. } => {
+            Action::SendNotification {
+                method,
+                params,
+                extensions,
+                ..
+            } => {
                 let mut outer = serializer.serialize_map(None)?;
                 let mut inner = serde_json::Map::new();
                 inner.insert("method".to_string(), Value::String(method.clone()));
@@ -249,7 +262,12 @@ impl Serialize for Action {
                 }
                 outer.end()
             }
-            Action::Log { message, level, extensions, .. } => {
+            Action::Log {
+                message,
+                level,
+                extensions,
+                ..
+            } => {
                 let mut outer = serializer.serialize_map(None)?;
                 let mut inner = serde_json::Map::new();
                 inner.insert("message".to_string(), Value::String(message.clone()));
@@ -294,7 +312,12 @@ impl Serialize for Action {
                 }
                 outer.end()
             }
-            Action::BindingSpecific { key, value, extensions, .. } => {
+            Action::BindingSpecific {
+                key,
+                value,
+                extensions,
+                ..
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry(key, value)?;
                 for (k, v) in extensions {
@@ -308,8 +331,7 @@ impl Serialize for Action {
 
 impl<'de> Deserialize<'de> for Action {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let map: serde_json::Map<String, Value> =
-            serde_json::Map::deserialize(deserializer)?;
+        let map: serde_json::Map<String, Value> = serde_json::Map::deserialize(deserializer)?;
 
         let mut extensions = HashMap::new();
         let mut action_key = None;
@@ -334,16 +356,21 @@ impl<'de> Deserialize<'de> for Action {
 
         match key.as_str() {
             "send_notification" => {
-                let obj = value
-                    .as_object()
-                    .ok_or_else(|| serde::de::Error::custom("send_notification must be an object"))?;
+                let obj = value.as_object().ok_or_else(|| {
+                    serde::de::Error::custom("send_notification must be an object")
+                })?;
                 let method = obj
                     .get("method")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| serde::de::Error::custom("send_notification requires 'method'"))?
                     .to_string();
                 let params = obj.get("params").cloned();
-                Ok(Action::SendNotification { method, params, extensions, non_ext_key_count })
+                Ok(Action::SendNotification {
+                    method,
+                    params,
+                    extensions,
+                    non_ext_key_count,
+                })
             }
             "log" => {
                 let obj = value
@@ -359,12 +386,17 @@ impl<'de> Deserialize<'de> for Action {
                     .map(|v| serde_json::from_value(v.clone()))
                     .transpose()
                     .map_err(serde::de::Error::custom)?;
-                Ok(Action::Log { message, level, extensions, non_ext_key_count })
+                Ok(Action::Log {
+                    message,
+                    level,
+                    extensions,
+                    non_ext_key_count,
+                })
             }
             "send_elicitation" => {
-                let obj = value
-                    .as_object()
-                    .ok_or_else(|| serde::de::Error::custom("send_elicitation must be an object"))?;
+                let obj = value.as_object().ok_or_else(|| {
+                    serde::de::Error::custom("send_elicitation must be an object")
+                })?;
                 let message = obj
                     .get("message")
                     .and_then(|v| v.as_str())
@@ -376,7 +408,10 @@ impl<'de> Deserialize<'de> for Action {
                     .transpose()
                     .map_err(serde::de::Error::custom)?;
                 let requested_schema = obj.get("requestedSchema").cloned();
-                let url = obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let url = obj
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 Ok(Action::SendElicitation {
                     message,
                     mode,
@@ -386,9 +421,12 @@ impl<'de> Deserialize<'de> for Action {
                     non_ext_key_count,
                 })
             }
-            _ => {
-                Ok(Action::BindingSpecific { key, value, extensions, non_ext_key_count })
-            }
+            _ => Ok(Action::BindingSpecific {
+                key,
+                value,
+                extensions,
+                non_ext_key_count,
+            }),
         }
     }
 }
@@ -632,17 +670,32 @@ impl<'de> Deserialize<'de> for PatternMatch {
             .as_object()
             .ok_or_else(|| serde::de::Error::custom("pattern must be an object"))?;
 
-        let target = map.get("target").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let target = map
+            .get("target")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let condition = map.get("condition").map(|v| {
             // Condition can be a bare value or a MatchCondition object
             Condition::from_value(v.clone())
         });
 
         // Shorthand operator fields
-        let contains = map.get("contains").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let starts_with = map.get("starts_with").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let ends_with = map.get("ends_with").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let regex = map.get("regex").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let contains = map
+            .get("contains")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let starts_with = map
+            .get("starts_with")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let ends_with = map
+            .get("ends_with")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let regex = map
+            .get("regex")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let any_of = map.get("any_of").and_then(|v| v.as_array()).cloned();
         let gt = map.get("gt").and_then(|v| v.as_f64());
         let lt = map.get("lt").and_then(|v| v.as_f64());
@@ -688,10 +741,10 @@ impl Condition {
                     "lte",
                     "exists",
                 ];
-                if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
-                    if let Ok(cond) = serde_json::from_value::<MatchCondition>(v.clone()) {
-                        return Condition::Operators(cond);
-                    }
+                if map.keys().any(|k| operator_keys.contains(&k.as_str()))
+                    && let Ok(cond) = serde_json::from_value::<MatchCondition>(v.clone())
+                {
+                    return Condition::Operators(cond);
                 }
                 Condition::Equality(v)
             }

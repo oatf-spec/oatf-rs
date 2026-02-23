@@ -1,3 +1,8 @@
+//! YAML → [`Document`] deserialization.
+//!
+//! Two-step process: YAML → `serde_json::Value` → `Document`. Pre-parse rejects
+//! YAML anchors/aliases/merge keys, multi-document streams, and unknown top-level keys.
+
 use crate::error::{ParseError, ParseErrorKind};
 use crate::types::Document;
 
@@ -96,7 +101,10 @@ fn validate_extension_keys(doc: &Document) -> Result<(), ParseError> {
 
     if let Some(actors) = &doc.attack.execution.actors {
         for (i, actor) in actors.iter().enumerate() {
-            check_extensions(&actor.extensions, &format!("attack.execution.actors[{}]", i))?;
+            check_extensions(
+                &actor.extensions,
+                &format!("attack.execution.actors[{}]", i),
+            )?;
             for (j, phase) in actor.phases.iter().enumerate() {
                 check_extensions(
                     &phase.extensions,
@@ -108,7 +116,10 @@ fn validate_extension_keys(doc: &Document) -> Result<(), ParseError> {
 
     if let Some(phases) = &doc.attack.execution.phases {
         for (j, phase) in phases.iter().enumerate() {
-            check_extensions(&phase.extensions, &format!("attack.execution.phases[{}]", j))?;
+            check_extensions(
+                &phase.extensions,
+                &format!("attack.execution.phases[{}]", j),
+            )?;
         }
     }
 
@@ -129,7 +140,10 @@ fn check_extensions(
         if !key.starts_with("x-") {
             return Err(ParseError {
                 kind: ParseErrorKind::TypeMismatch,
-                message: format!("unknown field '{}' at {} (non-extension fields must not use reserved names; extension fields must start with 'x-')", key, path),
+                message: format!(
+                    "unknown field '{}' at {} (non-extension fields must not use reserved names; extension fields must start with 'x-')",
+                    key, path
+                ),
                 path: Some(format!("{}.{}", path, key)),
                 line: None,
                 column: None,
@@ -226,7 +240,8 @@ fn mask_plain_scalar_values(line: &str) -> String {
             let first_char = line.as_bytes()[abs_pos];
             // If the value starts with &, *, [, {, or is empty — keep scanning
             // (these are structural YAML positions where anchors/aliases are valid)
-            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{' {
+            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{'
+            {
                 // Plain scalar value — mask it to prevent false positives
                 let mask = " ".repeat(line.len() - abs_pos);
                 result = format!("{}{}", &line[..abs_pos], mask);
@@ -241,7 +256,8 @@ fn mask_plain_scalar_values(line: &str) -> String {
         if let Some(offset) = value_start {
             let abs_pos = prefix_len + 2 + offset;
             let first_char = line.as_bytes()[abs_pos];
-            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{' {
+            if first_char != b'&' && first_char != b'*' && first_char != b'[' && first_char != b'{'
+            {
                 let mask = " ".repeat(line.len() - abs_pos);
                 result = format!("{}{}", &line[..abs_pos], mask);
             }
@@ -258,8 +274,8 @@ fn line_introduces_block_scalar(trimmed: &str) -> bool {
     // Find the value part after the colon (for mappings)
     let value_part = if let Some(colon_pos) = find_colon_in_yaml(trimmed) {
         trimmed[colon_pos + 1..].trim()
-    } else if trimmed.starts_with("- ") {
-        trimmed[2..].trim()
+    } else if let Some(rest) = trimmed.strip_prefix("- ") {
+        rest.trim()
     } else {
         return false;
     };
@@ -280,8 +296,14 @@ fn find_colon_in_yaml(line: &str) -> Option<usize> {
             b'"' => {
                 i += 1;
                 while i < bytes.len() {
-                    if bytes[i] == b'\\' { i += 2; continue; }
-                    if bytes[i] == b'"' { i += 1; break; }
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    }
                     i += 1;
                 }
             }
@@ -290,7 +312,11 @@ fn find_colon_in_yaml(line: &str) -> Option<usize> {
                 while i < bytes.len() {
                     if bytes[i] == b'\'' {
                         i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' { i += 1; } else { break; }
+                        if i < bytes.len() && bytes[i] == b'\'' {
+                            i += 1;
+                        } else {
+                            break;
+                        }
                     } else {
                         i += 1;
                     }
@@ -299,7 +325,9 @@ fn find_colon_in_yaml(line: &str) -> Option<usize> {
             b':' if i + 1 >= bytes.len() || bytes[i + 1] == b' ' || bytes[i + 1] == b'\t' => {
                 return Some(i);
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     None
@@ -314,8 +342,14 @@ fn strip_trailing_comment(value: &str) -> &str {
             b'"' => {
                 i += 1;
                 while i < bytes.len() {
-                    if bytes[i] == b'\\' { i += 2; continue; }
-                    if bytes[i] == b'"' { i += 1; break; }
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    }
                     i += 1;
                 }
             }
@@ -324,8 +358,11 @@ fn strip_trailing_comment(value: &str) -> &str {
                 while i < bytes.len() {
                     if bytes[i] == b'\'' {
                         i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' { i += 1; }
-                        else { break; }
+                        if i < bytes.len() && bytes[i] == b'\'' {
+                            i += 1;
+                        } else {
+                            break;
+                        }
                     } else {
                         i += 1;
                     }
@@ -337,7 +374,9 @@ fn strip_trailing_comment(value: &str) -> &str {
             b'#' if i == 0 => {
                 return "";
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     value

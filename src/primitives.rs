@@ -72,15 +72,11 @@ pub fn resolve_wildcard_path(path: &str, value: &Value) -> Vec<Value> {
                         None => continue,
                     }
                 };
-                match target.as_array() {
-                    Some(arr) => next.extend(arr.iter().cloned()),
-                    None => {} // not an array → produce no results
+                if let Some(arr) = target.as_array() {
+                    next.extend(arr.iter().cloned());
                 }
-            } else {
-                match val.as_object().and_then(|o| o.get(&seg.name)) {
-                    Some(v) => next.push(v.clone()),
-                    None => {} // missing field → produce no results
-                }
+            } else if let Some(v) = val.as_object().and_then(|o| o.get(&seg.name)) {
+                next.push(v.clone());
             }
         }
         current = next;
@@ -173,7 +169,10 @@ pub fn parse_duration(input: &str) -> Result<Duration, ParseError> {
 
 fn parse_shorthand_duration(input: &str) -> Result<Duration, ParseError> {
     if input.len() < 2 {
-        return Err(duration_error(&format!("invalid shorthand duration: '{}'", input)));
+        return Err(duration_error(&format!(
+            "invalid shorthand duration: '{}'",
+            input
+        )));
     }
 
     let (num_str, unit) = input.split_at(input.len() - 1);
@@ -186,7 +185,12 @@ fn parse_shorthand_duration(input: &str) -> Result<Duration, ParseError> {
         "m" => n * 60,
         "h" => n * 3600,
         "d" => n * 86400,
-        _ => return Err(duration_error(&format!("unknown duration unit: '{}'", unit))),
+        _ => {
+            return Err(duration_error(&format!(
+                "unknown duration unit: '{}'",
+                unit
+            )));
+        }
     };
 
     Ok(Duration::from_secs(secs))
@@ -204,20 +208,26 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
 
     // Parse date component (only D supported)
     if !date_part.is_empty() {
-        if date_part.ends_with('D') {
-            let n: u64 = date_part[..date_part.len() - 1]
+        if let Some(num_str) = date_part.strip_suffix('D') {
+            let n: u64 = num_str
                 .parse()
                 .map_err(|_| duration_error(&format!("invalid ISO duration: '{}'", input)))?;
             total_secs += n * 86400;
         } else {
-            return Err(duration_error(&format!("invalid ISO duration: '{}'", input)));
+            return Err(duration_error(&format!(
+                "invalid ISO duration: '{}'",
+                input
+            )));
         }
     }
 
     // Parse time components (H, M, S)
     if let Some(time) = time_part {
         if time.is_empty() {
-            return Err(duration_error(&format!("invalid ISO duration: '{}'", input)));
+            return Err(duration_error(&format!(
+                "invalid ISO duration: '{}'",
+                input
+            )));
         }
         let mut remaining = time;
         // Hours
@@ -245,13 +255,19 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
             remaining = &remaining[s_pos + 1..];
         }
         if !remaining.is_empty() {
-            return Err(duration_error(&format!("invalid ISO duration: '{}'", input)));
+            return Err(duration_error(&format!(
+                "invalid ISO duration: '{}'",
+                input
+            )));
         }
     }
 
     // Must have at least some duration component
     if date_part.is_empty() && time_part.is_none() {
-        return Err(duration_error(&format!("invalid ISO duration: '{}'", input)));
+        return Err(duration_error(&format!(
+            "invalid ISO duration: '{}'",
+            input
+        )));
     }
 
     Ok(Duration::from_secs(total_secs))
@@ -332,53 +348,37 @@ pub fn evaluate_match_condition(cond: &MatchCondition, value: &Value) -> bool {
         }
     }
 
-    if let Some(ref items) = cond.any_of {
-        if !items.iter().any(|item| values_deep_equal(value, item)) {
-            return false;
-        }
+    if let Some(ref items) = cond.any_of
+        && !items.iter().any(|item| values_deep_equal(value, item))
+    {
+        return false;
     }
 
     if let Some(threshold) = cond.gt {
         match value.as_f64() {
-            Some(v) => {
-                if !(v > threshold) {
-                    return false;
-                }
-            }
-            None => return false,
+            Some(v) if v > threshold => {}
+            _ => return false,
         }
     }
 
     if let Some(threshold) = cond.lt {
         match value.as_f64() {
-            Some(v) => {
-                if !(v < threshold) {
-                    return false;
-                }
-            }
-            None => return false,
+            Some(v) if v < threshold => {}
+            _ => return false,
         }
     }
 
     if let Some(threshold) = cond.gte {
         match value.as_f64() {
-            Some(v) => {
-                if !(v >= threshold) {
-                    return false;
-                }
-            }
-            None => return false,
+            Some(v) if v >= threshold => {}
+            _ => return false,
         }
     }
 
     if let Some(threshold) = cond.lte {
         match value.as_f64() {
-            Some(v) => {
-                if !(v <= threshold) {
-                    return false;
-                }
-            }
-            None => return false,
+            Some(v) if v <= threshold => {}
+            _ => return false,
         }
     }
 
@@ -394,22 +394,20 @@ fn values_deep_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Number(a), Value::Number(b)) => {
-            match (a.as_f64(), b.as_f64()) {
-                (Some(fa), Some(fb)) => fa == fb,
-                _ => a == b,
-            }
-        }
+        (Value::Number(a), Value::Number(b)) => match (a.as_f64(), b.as_f64()) {
+            (Some(fa), Some(fb)) => fa == fb,
+            _ => a == b,
+        },
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len()
-                && a.iter().zip(b.iter()).all(|(a, b)| values_deep_equal(a, b))
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| values_deep_equal(a, b))
         }
         (Value::Object(a), Value::Object(b)) => {
             if a.len() != b.len() {
                 return false;
             }
-            a.iter().all(|(k, v)| b.get(k).is_some_and(|bv| values_deep_equal(v, bv)))
+            a.iter()
+                .all(|(k, v)| b.get(k).is_some_and(|bv| values_deep_equal(v, bv)))
         }
         _ => false,
     }
@@ -430,19 +428,20 @@ pub fn evaluate_predicate(predicate: &MatchPredicate, value: &Value) -> bool {
         let resolved = resolve_simple_path(path, value);
 
         match entry {
-            MatchEntry::Scalar(expected) => {
-                match &resolved {
-                    Some(val) => {
-                        if !values_deep_equal(val, expected) {
-                            return false;
-                        }
+            MatchEntry::Scalar(expected) => match &resolved {
+                Some(val) => {
+                    if !values_deep_equal(val, expected) {
+                        return false;
                     }
-                    None => return false,
                 }
-            }
+                None => return false,
+            },
             MatchEntry::Condition(cond) => {
                 match cond {
-                    MatchCondition { exists: Some(false), .. } => {
+                    MatchCondition {
+                        exists: Some(false),
+                        ..
+                    } => {
                         // exists: false — path should NOT resolve
                         if resolved.is_some() {
                             return false;
@@ -451,7 +450,9 @@ pub fn evaluate_predicate(predicate: &MatchPredicate, value: &Value) -> bool {
                         // irrelevant (AND with false-on-resolved = always false
                         // for value-inspecting ops when path didn't resolve)
                     }
-                    MatchCondition { exists: Some(true), .. } => {
+                    MatchCondition {
+                        exists: Some(true), ..
+                    } => {
                         // exists: true — path MUST resolve
                         if resolved.is_none() {
                             return false;
@@ -688,14 +689,13 @@ pub fn evaluate_trigger(
     event_count: usize,
 ) -> TriggerResult {
     // 1. Check timeout
-    if let Some(after) = &trigger.after {
-        if let Ok(timeout) = parse_duration(after) {
-            if elapsed >= timeout {
-                return TriggerResult::Advanced {
-                    reason: AdvanceReason::Timeout,
-                };
-            }
-        }
+    if let Some(after) = &trigger.after
+        && let Ok(timeout) = parse_duration(after)
+        && elapsed >= timeout
+    {
+        return TriggerResult::Advanced {
+            reason: AdvanceReason::Timeout,
+        };
     }
 
     // 2. Check event match
@@ -705,10 +705,10 @@ pub fn evaluate_trigger(
 
         if trigger_base == event_base {
             // Check match predicate if present
-            if let Some(predicate) = &trigger.match_predicate {
-                if !evaluate_predicate(predicate, &ev.content) {
-                    return TriggerResult::NotAdvanced;
-                }
+            if let Some(predicate) = &trigger.match_predicate
+                && !evaluate_predicate(predicate, &ev.content)
+            {
+                return TriggerResult::NotAdvanced;
             }
 
             // Check count

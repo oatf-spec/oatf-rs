@@ -192,12 +192,8 @@ fn evaluate_expression_suite() {
                 None
             };
 
-        let verdict = evaluate::evaluate_indicator(
-            &indicator,
-            &case.input.message,
-            cel_eval_opt,
-            None,
-        );
+        let verdict =
+            evaluate::evaluate_indicator(&indicator, &case.input.message, cel_eval_opt, None);
 
         let result_str = match verdict.result {
             IndicatorResult::Matched => "matched",
@@ -329,17 +325,15 @@ fn evaluate_semantic_suite() {
 
         let sem_eval_opt: Option<&dyn evaluate::SemanticEvaluator> =
             if case.input.semantic_evaluator.present {
-                mock_evaluator.as_ref().map(|e| e as &dyn evaluate::SemanticEvaluator)
+                mock_evaluator
+                    .as_ref()
+                    .map(|e| e as &dyn evaluate::SemanticEvaluator)
             } else {
                 None
             };
 
-        let verdict = evaluate::evaluate_indicator(
-            &indicator,
-            &case.input.message,
-            None,
-            sem_eval_opt,
-        );
+        let verdict =
+            evaluate::evaluate_indicator(&indicator, &case.input.message, None, sem_eval_opt);
 
         let result_str = match verdict.result {
             IndicatorResult::Matched => "matched",
