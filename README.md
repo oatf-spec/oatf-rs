@@ -1,5 +1,16 @@
 # oatf
 
+[![CI](https://github.com/oatf-spec/oatf-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/oatf-spec/oatf-rs/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/oatf-spec/oatf-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/oatf-spec/oatf-rs)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/BEST_PRACTICES_ID/badge)](https://www.bestpractices.dev/projects/BEST_PRACTICES_ID)
+
+[![crates.io](https://img.shields.io/crates/v/oatf.svg)](https://crates.io/crates/oatf)
+[![docs.rs](https://docs.rs/oatf/badge.svg)](https://docs.rs/oatf)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85.0-blue)](https://github.com/oatf-spec/oatf-rs/blob/main/Cargo.toml)
+
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/GITHUB_USER/COVERAGE_GIST_ID/raw/coverage.json)](https://github.com/oatf-spec/oatf-rs/actions/workflows/ci.yml)
+[![License](https://img.shields.io/crates/l/oatf)](https://github.com/oatf-spec/oatf-rs/blob/main/LICENSE)
+
 Rust SDK for the [Open Agent Threat Format (OATF)](https://oatf.io).
 
 OATF is a YAML-based format for describing security threats against AI agent

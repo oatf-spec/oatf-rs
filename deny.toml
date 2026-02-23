@@ -18,6 +18,10 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+deny = [
+    { crate = "serde_yaml", reason = "Use serde-saphyr instead (architectural decision)" },
+    { crate = "serde_yml", reason = "Use serde-saphyr instead (architectural decision)" },
+]
 
 [sources]
 unknown-registry = "deny"
