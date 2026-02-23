@@ -1,0 +1,36 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  OATF_CONFORMANCE_DIR: spec/conformance
+
+jobs:
+  mutants:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          key: mutation
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants
+      - name: Run mutation tests
+        run: cargo mutants --timeout 300 -- --all-targets
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutants-report
+          path: mutants.out/
