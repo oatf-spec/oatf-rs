@@ -43,7 +43,7 @@ static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-z][a-z0-9_]*$").unwrap()
 });
 
-/// Validate a parsed document against all 43 conformance rules (V-001..V-043).
+/// Validate a parsed document against all 45 conformance rules (V-001..V-045).
 /// Returns a ValidationResult containing all errors and warnings found.
 pub fn validate(doc: &Document) -> ValidationResult {
     let mut errors = Vec::new();
@@ -92,6 +92,8 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v041_expression_variable_keys(doc, &mut errors);
     v042_trigger_event_or_after(doc, &mut errors);
     v043_binding_specific_action_keys(doc, &mut errors);
+    v044_regex_extractor_capture_group(doc, &mut errors);
+    v045_on_enter_non_empty(doc, &mut errors);
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
@@ -1736,8 +1738,13 @@ pub fn is_valid_duration(s: &str) -> bool {
     if ISO_DURATION_RE.is_match(s) {
         // Must have at least one component
         let has_day = s.contains('D');
-        let has_time = s.contains('T') && (s.contains('H') || s.contains('M') || s.contains('S'));
-        return has_day || has_time;
+        let has_t = s.contains('T');
+        let has_time_component = s.contains('H') || s.contains('M') || s.contains('S');
+        // If T is present, it must have at least one time component (reject "P1DT", "PT")
+        if has_t && !has_time_component {
+            return false;
+        }
+        return has_day || has_time_component;
     }
     false
 }
@@ -1859,6 +1866,70 @@ fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<Validation
                             ),
                         });
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─── V-044 ──────────────────────────────────────────────────────────────────
+
+fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(extractors) = &phase.extractors {
+                for (ei, ext) in extractors.iter().enumerate() {
+                    if ext.extractor_type == crate::enums::ExtractorType::Regex {
+                        // Check that the selector contains at least one capture group
+                        if !has_capture_group(&ext.selector) {
+                            errors.push(ValidationError {
+                                rule: "V-044".to_string(),
+                                path: format!(
+                                    "{}.phases[{}].extractors[{}].selector",
+                                    actor_info.path_prefix, pi, ei
+                                ),
+                                message: "regex extractor selector must contain at least one capture group".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Check if a regex pattern contains at least one unescaped capture group.
+fn has_capture_group(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2; // skip escaped character
+            continue;
+        }
+        if bytes[i] == b'(' && (i + 1 >= bytes.len() || bytes[i + 1] != b'?') {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+// ─── V-045 ──────────────────────────────────────────────────────────────────
+
+fn v045_on_enter_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(actions) = &phase.on_enter {
+                if actions.is_empty() {
+                    errors.push(ValidationError {
+                        rule: "V-045".to_string(),
+                        path: format!(
+                            "{}.phases[{}].on_enter",
+                            actor_info.path_prefix, pi
+                        ),
+                        message: "on_enter, when present, must contain at least one action".to_string(),
+                    });
                 }
             }
         }
