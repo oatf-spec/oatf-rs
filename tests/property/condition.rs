@@ -1,7 +1,7 @@
 use oatf::primitives::{evaluate_condition, evaluate_match_condition};
 use oatf::types::{Condition, MatchCondition};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn empty_match_condition() -> MatchCondition {
     MatchCondition {

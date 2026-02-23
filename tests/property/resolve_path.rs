@@ -1,6 +1,6 @@
 use oatf::primitives::{resolve_simple_path, resolve_wildcard_path};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Strategy for arbitrary JSON values nested up to `depth` levels.
 fn arb_json(depth: u32) -> impl Strategy<Value = Value> {
@@ -14,14 +14,9 @@ fn arb_json(depth: u32) -> impl Strategy<Value = Value> {
     leaf.prop_recursive(depth, 64, 8, |inner| {
         prop_oneof![
             // Array of values
-            prop::collection::vec(inner.clone(), 0..6)
-                .prop_map(Value::Array),
+            prop::collection::vec(inner.clone(), 0..6).prop_map(Value::Array),
             // Object with snake_case keys
-            prop::collection::vec(
-                ("[a-z][a-z0-9]{0,5}", inner),
-                1..5,
-            )
-            .prop_map(|pairs| {
+            prop::collection::vec(("[a-z][a-z0-9]{0,5}", inner), 1..5,).prop_map(|pairs| {
                 let map: serde_json::Map<String, Value> = pairs.into_iter().collect();
                 Value::Object(map)
             }),

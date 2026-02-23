@@ -1,11 +1,10 @@
 use oatf::primitives::{resolve_simple_path, resolve_wildcard_path};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Strategy for valid dot-separated paths.
 fn arb_dot_path() -> impl Strategy<Value = String> {
-    prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..5)
-        .prop_map(|parts| parts.join("."))
+    prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..5).prop_map(|parts| parts.join("."))
 }
 
 /// Build a nested object from a dot-path with a leaf value.

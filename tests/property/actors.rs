@@ -4,10 +4,7 @@ use proptest::prelude::*;
 
 /// Strategy for valid mode strings matching `[a-z][a-z0-9_]*_(server|client)`.
 fn arb_mode() -> impl Strategy<Value = String> {
-    prop_oneof![
-        "[a-z][a-z0-9]{0,6}_server",
-        "[a-z][a-z0-9]{0,6}_client",
-    ]
+    prop_oneof!["[a-z][a-z0-9]{0,6}_server", "[a-z][a-z0-9]{0,6}_client",]
 }
 
 /// Strategy for valid actor names matching `[a-z][a-z0-9_]*`.

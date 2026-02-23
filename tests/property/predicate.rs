@@ -1,7 +1,7 @@
-use oatf::primitives::{evaluate_predicate, evaluate_condition};
+use oatf::primitives::{evaluate_condition, evaluate_predicate};
 use oatf::types::{Condition, MatchCondition, MatchEntry};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 fn empty_match_condition() -> MatchCondition {
