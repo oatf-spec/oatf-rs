@@ -59,13 +59,18 @@ impl std::error::Error for ParseError {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationError {
     pub rule: String,
+    pub spec_ref: String,
     pub path: String,
     pub message: String,
 }
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}: {}", self.rule, self.path, self.message)
+        write!(
+            f,
+            "{} ({}) at {}: {}",
+            self.rule, self.spec_ref, self.path, self.message
+        )
     }
 }
 

@@ -67,6 +67,7 @@ fn is_valid_returns_false_when_errors_present() {
     let result = ValidationResult {
         errors: vec![ValidationError {
             rule: "V-001".to_string(),
+            spec_ref: "§11.1.1".to_string(),
             path: "attack".to_string(),
             message: "test error".to_string(),
         }],
