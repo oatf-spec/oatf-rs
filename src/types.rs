@@ -14,59 +14,81 @@ use crate::enums::*;
 /// The top-level container for a parsed OATF document.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
+    /// OATF format version string (e.g., `"0.1"`).
     pub oatf: String,
+    /// Optional JSON Schema URI for editor validation.
     #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
+    /// The attack description and all contained structures.
     pub attack: Attack,
+    /// Whether `oatf` was the first key in the original YAML (for W-001).
     #[serde(skip)]
     pub oatf_is_first_key: bool,
 }
 
 // ─── §2.3 Attack ─────────────────────────────────────────────────────────────
 
-/// The attack envelope and all contained structures.
+/// The attack envelope containing metadata, execution, and indicators.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Attack {
+    /// Unique attack identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Human-readable attack name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Document version number (integer).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i64>,
+    /// Document lifecycle status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
+    /// ISO 8601 creation date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created: Option<String>,
+    /// ISO 8601 last-modified date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified: Option<String>,
+    /// Author name or identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Human-readable attack description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Grace period duration string (e.g., `"30d"`) for responsible disclosure.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grace_period: Option<String>,
+    /// Attack severity (scalar string or object with level + confidence).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<Severity>,
+    /// Categories of harm caused by this attack.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub impact: Option<Vec<Impact>>,
+    /// OATF taxonomy classification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classification: Option<Classification>,
+    /// External references (URLs, papers, advisories).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub references: Option<Vec<Reference>>,
+    /// Execution plan describing the attack phases and actors.
     pub execution: Execution,
+    /// Detection indicators for this attack.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub indicators: Option<Vec<Indicator>>,
+    /// Verdict correlation configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation: Option<Correlation>,
-    /// Extension fields (x-* prefixed).
+    /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
     pub extensions: HashMap<String, Value>,
 }
 
 // ─── §2.3a Correlation ───────────────────────────────────────────────────────
 
+/// Configuration for how indicator verdicts combine into an attack-level result.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Correlation logic (`any` or `all`). Defaults to `any` at evaluation time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logic: Option<CorrelationLogic>,
 }
@@ -78,9 +100,13 @@ pub struct Correlation {
 /// After normalization, always in object form.
 #[derive(Clone, Debug)]
 pub enum Severity {
+    /// Shorthand scalar form (e.g., `"high"`). Normalized to `Object` by N-003.
     Scalar(SeverityLevel),
+    /// Full object form with level and optional confidence.
     Object {
+        /// Severity level classification.
         level: SeverityLevel,
+        /// Confidence percentage (0–100), if specified.
         confidence: Option<i64>,
     },
 }
@@ -138,64 +164,88 @@ impl<'de> Deserialize<'de> for Severity {
 
 // ─── §2.5 Classification ────────────────────────────────────────────────────
 
+/// OATF taxonomy classification with optional framework mappings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Classification {
+    /// OATF taxonomy category.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<Category>,
+    /// Mappings to external security frameworks (MITRE ATT&CK, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mappings: Option<Vec<FrameworkMapping>>,
+    /// Free-form tags for categorization.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }
 
 // ─── §2.6 Execution ─────────────────────────────────────────────────────────
 
+/// Execution plan describing how the attack is carried out.
+///
+/// Exactly one of `state`, `phases`, or `actors` must be present (three
+/// mutually exclusive execution forms). After normalization, only `actors` is set.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Execution {
+    /// Protocol mode for single-phase form (e.g., `"mcp/sse"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Single-phase execution state (JSON object). Mutually exclusive with `phases`/`actors`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<Value>,
+    /// Multi-phase execution form. Mutually exclusive with `state`/`actors`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<Vec<Phase>>,
+    /// Multi-actor execution form (canonical). Mutually exclusive with `state`/`phases`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actors: Option<Vec<Actor>>,
-    /// Extension fields (x-* prefixed).
+    /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
     pub extensions: HashMap<String, Value>,
 }
 
 // ─── §2.6a Actor ─────────────────────────────────────────────────────────────
 
+/// An actor in the multi-actor execution form, representing a protocol participant.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Actor {
+    /// Actor name identifier (e.g., `"attacker"`, `"victim"`).
     pub name: String,
+    /// Protocol mode (e.g., `"mcp/sse"`, `"a2a"`).
     pub mode: String,
+    /// Ordered list of execution phases for this actor.
     pub phases: Vec<Phase>,
-    /// Extension fields (x-* prefixed).
+    /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
     pub extensions: HashMap<String, Value>,
 }
 
 // ─── §2.7 Phase ──────────────────────────────────────────────────────────────
 
+/// An execution phase within an actor's plan.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Phase {
+    /// Phase name identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Human-readable phase description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Protocol mode override for this phase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Phase execution state (JSON object describing protocol messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<Value>,
+    /// Data extractors applied to protocol messages during this phase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extractors: Option<Vec<Extractor>>,
+    /// Actions executed when this phase begins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_enter: Option<Vec<Action>>,
+    /// Trigger condition that advances to the next phase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger: Option<Trigger>,
-    /// Extension fields (x-* prefixed).
+    /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
     pub extensions: HashMap<String, Value>,
 }
@@ -206,34 +256,51 @@ pub struct Phase {
 /// Tagged union with known variants + catch-all for binding-specific actions.
 #[derive(Clone, Debug)]
 pub enum Action {
+    /// Send a protocol notification message.
     SendNotification {
+        /// Notification method name.
         method: String,
+        /// Optional notification parameters.
         params: Option<Value>,
+        /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
         /// Number of non-extension keys in the original object (for V-043).
         non_ext_key_count: usize,
     },
+    /// Emit a log message.
     Log {
+        /// Log message text.
         message: String,
+        /// Log level (defaults to `info`).
         level: Option<LogLevel>,
+        /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
         /// Number of non-extension keys in the original object (for V-043).
         non_ext_key_count: usize,
     },
+    /// Send a user elicitation request.
     SendElicitation {
+        /// Elicitation message text.
         message: String,
+        /// Elicitation mode (`form` or `url`).
         mode: Option<ElicitationMode>,
+        /// JSON Schema for form-mode elicitation.
         #[allow(non_snake_case)]
         requested_schema: Option<Value>,
+        /// URL for url-mode elicitation.
         url: Option<String>,
+        /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
         /// Number of non-extension keys in the original object (for V-043).
         non_ext_key_count: usize,
     },
     /// Binding-specific action with a single unknown key.
     BindingSpecific {
+        /// The action key name.
         key: String,
+        /// The action value.
         value: Value,
+        /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
         /// Number of non-extension keys in the original object (for V-043).
         non_ext_key_count: usize,
@@ -433,44 +500,64 @@ impl<'de> Deserialize<'de> for Action {
 
 // ─── §2.8 Trigger ────────────────────────────────────────────────────────────
 
+/// Condition that advances execution to the next phase.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Trigger {
+    /// Protocol event name (e.g., `"mcp:tool_call"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event: Option<String>,
+    /// Number of matching events required before advancing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+    /// Predicate that the event payload must satisfy.
     #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
     pub match_predicate: Option<MatchPredicate>,
+    /// Duration string (e.g., `"5s"`) after which the trigger times out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
 }
 
 // ─── §2.8a ProtocolEvent ─────────────────────────────────────────────────────
 
+/// A protocol event observed during execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtocolEvent {
+    /// Qualified event type (e.g., `"mcp:tool_call"`).
     pub event_type: String,
+    /// Optional event qualifier (e.g., method name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualifier: Option<String>,
+    /// Event payload content.
     pub content: Value,
 }
 
 // ─── §2.8b TriggerResult ────────────────────────────────────────────────────
 
+/// Result of evaluating a trigger against an event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TriggerResult {
-    Advanced { reason: AdvanceReason },
+    /// The trigger condition was met and execution should advance.
+    Advanced {
+        /// Why the trigger advanced.
+        reason: AdvanceReason,
+    },
+    /// The trigger condition was not met.
     NotAdvanced,
 }
 
 // ─── §2.9 Extractor ─────────────────────────────────────────────────────────
 
+/// A data extractor that captures values from protocol messages.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Extractor {
+    /// Variable name to bind the extracted value to.
     pub name: String,
+    /// Whether to extract from request or response.
     pub source: ExtractorSource,
+    /// Extraction method (JSONPath or regex).
     #[serde(rename = "type")]
     pub extractor_type: ExtractorType,
+    /// JSONPath expression or regex pattern.
     pub selector: String,
 }
 
@@ -482,7 +569,9 @@ pub type MatchPredicate = HashMap<String, MatchEntry>;
 /// Either a scalar Value (equality check) or a MatchCondition object.
 #[derive(Clone, Debug)]
 pub enum MatchEntry {
+    /// Direct value equality comparison.
     Scalar(Value),
+    /// Operator-based condition (contains, regex, etc.).
     Condition(MatchCondition),
 }
 
@@ -528,54 +617,78 @@ impl<'de> Deserialize<'de> for MatchEntry {
 
 // ─── §2.11 MatchCondition ───────────────────────────────────────────────────
 
+/// Operator-based match condition for field comparison.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MatchCondition {
+    /// String containment check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contains: Option<String>,
+    /// String prefix check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub starts_with: Option<String>,
+    /// String suffix check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ends_with: Option<String>,
+    /// Regular expression match.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regex: Option<String>,
+    /// Value must be one of the given values.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub any_of: Option<Vec<Value>>,
+    /// Greater-than numeric comparison.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gt: Option<f64>,
+    /// Less-than numeric comparison.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lt: Option<f64>,
+    /// Greater-than-or-equal numeric comparison.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gte: Option<f64>,
+    /// Less-than-or-equal numeric comparison.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lte: Option<f64>,
+    /// Field existence check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exists: Option<bool>,
 }
 
 // ─── §2.12 Indicator ────────────────────────────────────────────────────────
 
+/// A detection indicator that matches against protocol messages.
+///
+/// Exactly one of `pattern`, `expression`, or `semantic` should be present.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Indicator {
+    /// Unique indicator identifier (used in verdict reporting).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Protocol this indicator applies to (e.g., `"mcp"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
+    /// Attack surface name (e.g., `"mcp:tool_call"`).
     pub surface: String,
+    /// Human-readable indicator description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Pattern-based detection (target + condition matching).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pattern: Option<PatternMatch>,
+    /// CEL expression-based detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expression: Option<ExpressionMatch>,
+    /// Semantic/intent-based detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic: Option<SemanticMatch>,
+    /// Confidence percentage (0–100) for this indicator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<i64>,
+    /// Indicator-level severity override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<SeverityLevel>,
+    /// Known false-positive descriptions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub false_positives: Option<Vec<String>>,
-    /// Extension fields (x-* prefixed).
+    /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
     pub extensions: HashMap<String, Value>,
 }
@@ -587,17 +700,28 @@ pub struct Indicator {
 /// In shorthand form: has operator keys directly (e.g., `contains`, `regex`).
 #[derive(Clone, Debug)]
 pub struct PatternMatch {
+    /// JSONPath target to match against.
     pub target: Option<String>,
+    /// Condition to evaluate against the resolved target value.
     pub condition: Option<Condition>,
     // Shorthand operator fields (before normalization)
+    /// Shorthand: string containment check.
     pub contains: Option<String>,
+    /// Shorthand: string prefix check.
     pub starts_with: Option<String>,
+    /// Shorthand: string suffix check.
     pub ends_with: Option<String>,
+    /// Shorthand: regular expression match.
     pub regex: Option<String>,
+    /// Shorthand: value must be one of the given values.
     pub any_of: Option<Vec<Value>>,
+    /// Shorthand: greater-than numeric comparison.
     pub gt: Option<f64>,
+    /// Shorthand: less-than numeric comparison.
     pub lt: Option<f64>,
+    /// Shorthand: greater-than-or-equal numeric comparison.
     pub gte: Option<f64>,
+    /// Shorthand: less-than-or-equal numeric comparison.
     pub lte: Option<f64>,
 }
 
@@ -721,7 +845,9 @@ impl<'de> Deserialize<'de> for PatternMatch {
 /// A Condition is either a bare Value (equality) or a MatchCondition object.
 #[derive(Clone, Debug)]
 pub enum Condition {
+    /// Direct value equality comparison.
     Equality(Value),
+    /// Operator-based condition.
     Operators(MatchCondition),
 }
 
@@ -764,115 +890,159 @@ impl Serialize for Condition {
 
 // ─── §2.14 ExpressionMatch ──────────────────────────────────────────────────
 
+/// A CEL expression-based detection indicator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExpressionMatch {
+    /// CEL expression to evaluate.
     pub cel: String,
+    /// Variable bindings: name → JSONPath.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variables: Option<HashMap<String, String>>,
 }
 
 // ─── §2.15 SemanticMatch ────────────────────────────────────────────────────
 
+/// A semantic/intent-based detection indicator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SemanticMatch {
+    /// JSONPath target to extract text from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Natural-language intent description to match against.
     pub intent: String,
+    /// Classification hint for the semantic evaluator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intent_class: Option<SemanticIntentClass>,
+    /// Similarity threshold (0.0–1.0); defaults to 0.7.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
+    /// Positive and negative examples for few-shot guidance.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub examples: Option<SemanticExamples>,
 }
 
 // ─── §2.16 SemanticExamples ─────────────────────────────────────────────────
 
+/// Positive and negative examples for semantic matching guidance.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SemanticExamples {
+    /// Examples that should match the intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub positive: Option<Vec<String>>,
+    /// Examples that should not match the intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub negative: Option<Vec<String>>,
 }
 
 // ─── §2.17 Reference ────────────────────────────────────────────────────────
 
+/// An external reference (URL, paper, advisory).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Reference {
+    /// Reference URL.
     pub url: String,
+    /// Human-readable title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Human-readable description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
 // ─── §2.18 FrameworkMapping ─────────────────────────────────────────────────
 
+/// A mapping to an external security framework (e.g., MITRE ATT&CK).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameworkMapping {
+    /// Framework name (e.g., `"MITRE ATT&CK"`).
     pub framework: String,
+    /// Framework-specific identifier (e.g., `"T1059"`).
     pub id: String,
+    /// Human-readable technique/entry name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// URL to the framework entry.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Relationship type (primary or related).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationship: Option<Relationship>,
 }
 
 // ─── §2.19 Verdict Types ────────────────────────────────────────────────────
 
+/// Result of evaluating a single indicator against a protocol message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndicatorVerdict {
+    /// Identifier of the evaluated indicator.
     pub indicator_id: String,
+    /// Evaluation result.
     pub result: IndicatorResult,
+    /// ISO 8601 timestamp of the evaluation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
+    /// Supporting evidence (e.g., matched value, error message).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Source that produced this verdict.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
 
+/// Attack-level verdict computed from indicator verdicts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttackVerdict {
+    /// Identifier of the evaluated attack.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attack_id: Option<String>,
+    /// Overall attack result.
     pub result: AttackResult,
+    /// Individual indicator verdicts.
     pub indicator_verdicts: Vec<IndicatorVerdict>,
+    /// Summary counts of indicator results.
     pub evaluation_summary: EvaluationSummary,
+    /// ISO 8601 timestamp of the verdict.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
+    /// Source that produced this verdict.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
 
+/// Summary counts of indicator evaluation results.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluationSummary {
+    /// Number of indicators that matched.
     pub matched: i64,
+    /// Number of indicators that did not match.
     pub not_matched: i64,
+    /// Number of indicators that errored.
     pub error: i64,
+    /// Number of indicators that were skipped.
     pub skipped: i64,
 }
 
 // ─── §2.23 SynthesizeBlock ──────────────────────────────────────────────────
 
+/// An LLM synthesis block for generating adversarial content.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizeBlock {
+    /// Prompt template for the generation provider.
     pub prompt: String,
 }
 
 // ─── §2.24 ResponseEntry ────────────────────────────────────────────────────
 
+/// A conditional response entry in a phase's state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResponseEntry {
+    /// Predicate that selects this response (matched against the request).
     #[serde(rename = "when", skip_serializing_if = "Option::is_none")]
     pub when: Option<MatchPredicate>,
+    /// LLM synthesis block for dynamic content generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub synthesize: Option<SynthesizeBlock>,
-    // Protocol-specific static content fields are captured as extra fields
-    // via serde(flatten) to support MCP content, MCP messages, A2A messages/artifacts
+    /// Protocol-specific static content fields (MCP content, A2A messages, etc.).
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
