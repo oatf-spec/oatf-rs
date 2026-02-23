@@ -20,10 +20,11 @@ struct TestCase {
 #[test]
 fn normalize_conformance_suite() {
     let suite_path = conformance_dir().join("normalize/suite.yaml");
-    if !suite_path.exists() {
-        eprintln!("Skipping normalize tests: {:?} not found", suite_path);
-        return;
-    }
+    assert!(
+        suite_path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        suite_path
+    );
 
     let content = std::fs::read_to_string(&suite_path).unwrap();
     let cases: Vec<TestCase> = serde_saphyr::from_str(&content).unwrap();

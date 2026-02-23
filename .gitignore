@@ -4,3 +4,5 @@ fuzz/corpus/
 fuzz/coverage/
 fuzz/target/
 fuzz/Cargo.lock
+CLAUDE.md
+.DS_Store

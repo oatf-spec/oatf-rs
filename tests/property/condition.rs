@@ -67,7 +67,7 @@ proptest! {
         prop_assert_eq!(result, value.ends_with(&suffix));
     }
 
-    // gt/lte are complementary for non-NaN values
+    // gt/lte are strict complements for all finite f64 values
     #[test]
     fn gt_lte_complementary(a in -1000.0f64..1000.0, b in -1000.0f64..1000.0) {
         let gt_cond = MatchCondition {
@@ -81,12 +81,12 @@ proptest! {
         let value = json!(a);
         let gt_result = evaluate_match_condition(&gt_cond, &value);
         let lte_result = evaluate_match_condition(&lte_cond, &value);
-        prop_assert!(gt_result != lte_result || a == b,
-            "gt({}, {})={} and lte({}, {})={} should be complementary (or equal)",
+        prop_assert_ne!(gt_result, lte_result,
+            "gt({}, {})={} and lte({}, {})={} must be strict complements",
             a, b, gt_result, a, b, lte_result);
     }
 
-    // lt/gte are complementary for non-NaN values
+    // lt/gte are strict complements for all finite f64 values
     #[test]
     fn lt_gte_complementary(a in -1000.0f64..1000.0, b in -1000.0f64..1000.0) {
         let lt_cond = MatchCondition {
@@ -100,8 +100,8 @@ proptest! {
         let value = json!(a);
         let lt_result = evaluate_match_condition(&lt_cond, &value);
         let gte_result = evaluate_match_condition(&gte_cond, &value);
-        prop_assert!(lt_result != gte_result || a == b,
-            "lt({}, {})={} and gte({}, {})={} should be complementary (or equal)",
+        prop_assert_ne!(lt_result, gte_result,
+            "lt({}, {})={} and gte({}, {})={} must be strict complements",
             a, b, lt_result, a, b, gte_result);
     }
 

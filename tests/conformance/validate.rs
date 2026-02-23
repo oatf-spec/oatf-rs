@@ -44,10 +44,11 @@ struct ExpectedWarning {
 #[test]
 fn validate_conformance_suite() {
     let suite_path = conformance_dir().join("validate/suite.yaml");
-    if !suite_path.exists() {
-        eprintln!("Skipping validate tests: {:?} not found", suite_path);
-        return;
-    }
+    assert!(
+        suite_path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        suite_path
+    );
 
     let content = std::fs::read_to_string(&suite_path).unwrap();
     let cases: Vec<TestCase> = serde_saphyr::from_str(&content).unwrap();
@@ -55,15 +56,19 @@ fn validate_conformance_suite() {
     let mut passed = 0;
     let mut failed = 0;
     let mut skipped = 0;
+    let mut parse_rejected = 0;
 
     for case in &cases {
         let doc = match parse(&case.input) {
             Ok(d) => d,
             Err(e) => {
-                // If the input can't parse, check if the test expects that
+                // This crate's parser is stricter than the conformance suite
+                // assumes: some V-rules (V-001, V-003, V-004, V-005, V-020)
+                // are caught at parse time rather than validation time.
+                // Accept parse errors only when the test expects the document
+                // to be invalid — either via `valid: false` or `errors: [...]`.
                 if case.expected.valid == Some(false) || case.expected.errors.is_some() {
-                    // Parse error is acceptable for invalid test cases
-                    passed += 1;
+                    parse_rejected += 1;
                     continue;
                 }
                 eprintln!("  FAIL [{}] {}: parse error: {}", case.id, case.name, e);
@@ -73,11 +78,10 @@ fn validate_conformance_suite() {
         };
 
         let result = validate(&doc);
+        let mut case_ok = true;
 
         if let Some(true) = case.expected.valid {
-            if result.is_valid() {
-                passed += 1;
-            } else {
+            if !result.is_valid() {
                 eprintln!(
                     "  FAIL [{}] {}: expected valid but got {} errors",
                     case.id,
@@ -87,7 +91,7 @@ fn validate_conformance_suite() {
                 for err in &result.errors {
                     eprintln!("    - {} at {}: {}", err.rule, err.path, err.message);
                 }
-                failed += 1;
+                case_ok = false;
             }
         } else if let Some(expected_errors) = &case.expected.errors {
             if result.errors.is_empty() {
@@ -101,10 +105,9 @@ fn validate_conformance_suite() {
                     "  FAIL [{}] {}: expected errors but got valid",
                     case.id, case.name
                 );
-                failed += 1;
+                case_ok = false;
             } else {
                 // Check that each expected error is present
-                let mut all_found = true;
                 for expected in expected_errors {
                     let found = result.errors.iter().any(|e| {
                         if e.rule != expected.rule {
@@ -124,23 +127,19 @@ fn validate_conformance_suite() {
                         for e in &result.errors {
                             eprintln!("      - {} at {}: {}", e.rule, e.path, e.message);
                         }
-                        all_found = false;
+                        case_ok = false;
                     }
-                }
-                if all_found {
-                    passed += 1;
-                } else {
-                    failed += 1;
                 }
             }
         } else {
             skipped += 1;
+            continue;
         }
 
         // Check warnings if expected
         if let Some(expected_warnings) = &case.expected.warnings {
             if expected_warnings.is_empty() {
-                // Expect no warnings — check that none are present
+                // Expect no warnings -- check that none are present
                 if !result.warnings.is_empty() {
                     eprintln!(
                         "  FAIL [{}] {}: expected no warnings but got {}",
@@ -151,7 +150,7 @@ fn validate_conformance_suite() {
                     for w in &result.warnings {
                         eprintln!("    - {} {:?}: {}", w.code, w.path, w.message);
                     }
-                    failed += 1;
+                    case_ok = false;
                 }
             } else {
                 for expected in expected_warnings {
@@ -173,34 +172,43 @@ fn validate_conformance_suite() {
                         for w in &result.warnings {
                             eprintln!("      - {} {:?}: {}", w.code, w.path, w.message);
                         }
-                        failed += 1;
+                        case_ok = false;
                     }
                 }
             }
         }
+
+        if case_ok {
+            passed += 1;
+        } else {
+            failed += 1;
+        }
     }
 
     eprintln!(
-        "\nValidation conformance: {} passed, {} failed, {} skipped out of {} total",
+        "\nValidation conformance: {} passed, {} failed, {} skipped, {} rejected at parse out of {} total",
         passed,
         failed,
         skipped,
+        parse_rejected,
         cases.len()
     );
 
+    assert!(
+        passed + parse_rejected > 0,
+        "No validation conformance cases were tested"
+    );
     assert_eq!(failed, 0, "{} validation conformance tests failed", failed);
 }
 
 #[test]
 fn validate_warnings_suite() {
     let suite_path = conformance_dir().join("validate/warnings.yaml");
-    if !suite_path.exists() {
-        eprintln!(
-            "Skipping validate warnings tests: {:?} not found",
-            suite_path
-        );
-        return;
-    }
+    assert!(
+        suite_path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        suite_path
+    );
 
     let content = std::fs::read_to_string(&suite_path).unwrap();
     let cases: Vec<TestCase> = serde_saphyr::from_str(&content).unwrap();

@@ -51,6 +51,7 @@ pub trait SemanticEvaluator {
 /// SDKs MUST NOT ship a default implementation (SDK spec §6.3).
 /// Used by adversarial tools to execute `synthesize` blocks.
 pub trait GenerationProvider {
+    /// Generates adversarial content from a prompt for the given protocol.
     fn generate(
         &self,
         prompt: &str,

@@ -9,7 +9,7 @@ fn conformance_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
-// ─── resolve_simple_path ─────────────────────────────────────────────────────
+// --- resolve_simple_path -----------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct SimplePathCase {
@@ -28,10 +28,11 @@ struct SimplePathInput {
 #[test]
 fn resolve_simple_path_suite() {
     let path = conformance_dir().join("primitives/resolve-simple-path.yaml");
-    if !path.exists() {
-        eprintln!("Skipping resolve_simple_path tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<SimplePathCase> = serde_saphyr::from_str(&content).unwrap();
@@ -85,7 +86,7 @@ fn resolve_simple_path_suite() {
     assert_eq!(failed, 0, "{} resolve_simple_path tests failed", failed);
 }
 
-// ─── resolve_wildcard_path ───────────────────────────────────────────────────
+// --- resolve_wildcard_path ---------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct WildcardPathCase {
@@ -109,10 +110,11 @@ struct WildcardPathExpected {
 #[test]
 fn resolve_wildcard_path_suite() {
     let path = conformance_dir().join("primitives/resolve-wildcard-path.yaml");
-    if !path.exists() {
-        eprintln!("Skipping resolve_wildcard_path tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<WildcardPathCase> = serde_saphyr::from_str(&content).unwrap();
@@ -143,7 +145,7 @@ fn resolve_wildcard_path_suite() {
     assert_eq!(failed, 0, "{} resolve_wildcard_path tests failed", failed);
 }
 
-// ─── parse_duration ──────────────────────────────────────────────────────────
+// --- parse_duration ----------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct DurationCase {
@@ -164,10 +166,11 @@ struct DurationExpected {
 #[test]
 fn parse_duration_suite() {
     let path = conformance_dir().join("primitives/parse-duration.yaml");
-    if !path.exists() {
-        eprintln!("Skipping parse_duration tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<DurationCase> = serde_saphyr::from_str(&content).unwrap();
@@ -226,7 +229,7 @@ fn parse_duration_suite() {
     assert_eq!(failed, 0, "{} parse_duration tests failed", failed);
 }
 
-// ─── evaluate_condition ──────────────────────────────────────────────────────
+// --- evaluate_condition ------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct ConditionCase {
@@ -245,10 +248,11 @@ struct ConditionInput {
 #[test]
 fn evaluate_condition_suite() {
     let path = conformance_dir().join("primitives/evaluate-condition.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_condition tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<ConditionCase> = serde_saphyr::from_str(&content).unwrap();
@@ -286,7 +290,7 @@ fn parse_condition(value: &Value) -> Condition {
     Condition::from_value(value.clone())
 }
 
-// ─── evaluate_predicate ──────────────────────────────────────────────────────
+// --- evaluate_predicate ------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct PredicateCase {
@@ -305,10 +309,11 @@ struct PredicateInput {
 #[test]
 fn evaluate_predicate_suite() {
     let path = conformance_dir().join("primitives/evaluate-predicate.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_predicate tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<PredicateCase> = serde_saphyr::from_str(&content).unwrap();
@@ -379,7 +384,7 @@ fn parse_match_entry(value: &Value) -> MatchEntry {
     }
 }
 
-// ─── interpolate_template ────────────────────────────────────────────────────
+// --- interpolate_template ----------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct TemplateCase {
@@ -403,10 +408,11 @@ struct TemplateInput {
 #[test]
 fn interpolate_template_suite() {
     let path = conformance_dir().join("primitives/interpolate-template.yaml");
-    if !path.exists() {
-        eprintln!("Skipping interpolate_template tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<TemplateCase> = serde_saphyr::from_str(&content).unwrap();
@@ -442,7 +448,7 @@ fn interpolate_template_suite() {
     assert_eq!(failed, 0, "{} interpolate_template tests failed", failed);
 }
 
-// ─── evaluate_extractor ──────────────────────────────────────────────────────
+// --- evaluate_extractor ------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct ExtractorCase {
@@ -470,10 +476,11 @@ struct ExtractorDef {
 #[test]
 fn evaluate_extractor_suite() {
     let path = conformance_dir().join("primitives/evaluate-extractor.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_extractor tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<ExtractorCase> = serde_saphyr::from_str(&content).unwrap();
@@ -534,7 +541,7 @@ fn evaluate_extractor_suite() {
     assert_eq!(failed, 0, "{} evaluate_extractor tests failed", failed);
 }
 
-// ─── compute_effective_state ─────────────────────────────────────────────────
+// --- compute_effective_state -------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct EffectiveStateCase {
@@ -560,13 +567,11 @@ struct PhaseInput {
 #[test]
 fn compute_effective_state_suite() {
     let path = conformance_dir().join("primitives/compute-effective-state.yaml");
-    if !path.exists() {
-        eprintln!(
-            "Skipping compute_effective_state tests: {:?} not found",
-            path
-        );
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<EffectiveStateCase> = serde_saphyr::from_str(&content).unwrap();

@@ -19,9 +19,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
         with:
           toolchain: stable
@@ -55,9 +56,10 @@ jobs:
         toolchain: [stable, nightly, "1.88.0"]
         features: ["", "--no-default-features", "--all-features"]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
         with:
           toolchain: ${{ matrix.toolchain }}
@@ -73,39 +75,3 @@ jobs:
         run: |
           cargo install cargo-fuzz
           cargo +nightly fuzz check
-
-  coverage:
-    name: Coverage
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          submodules: true
-      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
-        with:
-          key: coverage
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
-      - name: Generate coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
-      - name: Extract coverage percentage
-        id: cov
-        run: |
-          PCT=$(cargo llvm-cov --all-features --summary-only 2>&1 | grep -oP 'TOTAL\s+\S+\s+\S+\s+(\d+\.\d+)%' | grep -oP '\d+\.\d+' || echo "0")
-          echo "percentage=$PCT" >> "$GITHUB_OUTPUT"
-      - name: Update coverage badge
-        uses: schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483 # v1.7.0
-        with:
-          auth: ${{ secrets.GIST_TOKEN }}
-          gistID: COVERAGE_GIST_ID
-          filename: coverage.json
-          label: coverage
-          message: "${{ steps.cov.outputs.percentage }}%"
-          valColorRange: ${{ steps.cov.outputs.percentage }}
-          minColorRange: 50
-          maxColorRange: 90

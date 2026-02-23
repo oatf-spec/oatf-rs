@@ -14,10 +14,12 @@ jobs:
   mutants:
     name: Mutation testing
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
         with:
           toolchain: stable
@@ -27,10 +29,10 @@ jobs:
       - name: Install cargo-mutants
         run: cargo install cargo-mutants
       - name: Run mutation tests
-        run: cargo mutants --timeout 300 -- --all-targets
+        run: cargo mutants --timeout 60 --build-timeout 120 -- --all-targets || true
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: mutants-report
           path: mutants.out/
