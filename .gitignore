@@ -4,3 +4,4 @@ fuzz/corpus/
 fuzz/coverage/
 fuzz/target/
 fuzz/Cargo.lock
+CLAUDE.md
