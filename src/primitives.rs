@@ -187,10 +187,10 @@ fn parse_shorthand_duration(input: &str) -> Result<Duration, ParseError> {
         .map_err(|_| duration_error(&format!("invalid shorthand duration: '{}'", input)))?;
 
     let secs = match unit {
-        "s" => n,
-        "m" => n * 60,
-        "h" => n * 3600,
-        "d" => n * 86400,
+        "s" => Some(n),
+        "m" => n.checked_mul(60),
+        "h" => n.checked_mul(3600),
+        "d" => n.checked_mul(86400),
         _ => {
             return Err(duration_error(&format!(
                 "unknown duration unit: '{}'",
@@ -198,6 +198,9 @@ fn parse_shorthand_duration(input: &str) -> Result<Duration, ParseError> {
             )));
         }
     };
+
+    let secs =
+        secs.ok_or_else(|| duration_error(&format!("duration value too large: '{}'", input)))?;
 
     Ok(Duration::from_secs(secs))
 }
@@ -218,7 +221,10 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
             let n: u64 = num_str
                 .parse()
                 .map_err(|_| duration_error(&format!("invalid ISO duration: '{}'", input)))?;
-            total_secs += n * 86400;
+            total_secs = n
+                .checked_mul(86400)
+                .and_then(|v| total_secs.checked_add(v))
+                .ok_or_else(|| duration_error(&format!("duration value too large: '{}'", input)))?;
         } else {
             return Err(duration_error(&format!(
                 "invalid ISO duration: '{}'",
@@ -241,7 +247,10 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
             let n: u64 = remaining[..h_pos]
                 .parse()
                 .map_err(|_| duration_error(&format!("invalid ISO duration: '{}'", input)))?;
-            total_secs += n * 3600;
+            total_secs = n
+                .checked_mul(3600)
+                .and_then(|v| total_secs.checked_add(v))
+                .ok_or_else(|| duration_error(&format!("duration value too large: '{}'", input)))?;
             remaining = &remaining[h_pos + 1..];
         }
         // Minutes
@@ -249,7 +258,10 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
             let n: u64 = remaining[..m_pos]
                 .parse()
                 .map_err(|_| duration_error(&format!("invalid ISO duration: '{}'", input)))?;
-            total_secs += n * 60;
+            total_secs = n
+                .checked_mul(60)
+                .and_then(|v| total_secs.checked_add(v))
+                .ok_or_else(|| duration_error(&format!("duration value too large: '{}'", input)))?;
             remaining = &remaining[m_pos + 1..];
         }
         // Seconds
@@ -257,7 +269,9 @@ fn parse_iso_duration(input: &str) -> Result<Duration, ParseError> {
             let n: u64 = remaining[..s_pos]
                 .parse()
                 .map_err(|_| duration_error(&format!("invalid ISO duration: '{}'", input)))?;
-            total_secs += n;
+            total_secs = total_secs
+                .checked_add(n)
+                .ok_or_else(|| duration_error(&format!("duration value too large: '{}'", input)))?;
             remaining = &remaining[s_pos + 1..];
         }
         if !remaining.is_empty() {
