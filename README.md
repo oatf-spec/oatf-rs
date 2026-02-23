@@ -6,7 +6,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/oatf.svg)](https://crates.io/crates/oatf)
 [![docs.rs](https://docs.rs/oatf/badge.svg)](https://docs.rs/oatf)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85.0-blue)](https://github.com/oatf-spec/oatf-rs/blob/main/Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.87.0-blue)](https://github.com/oatf-spec/oatf-rs/blob/main/Cargo.toml)
 
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/GITHUB_USER/COVERAGE_GIST_ID/raw/coverage.json)](https://github.com/oatf-spec/oatf-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/oatf)](https://github.com/oatf-spec/oatf-rs/blob/main/LICENSE)
@@ -69,7 +69,7 @@ This crate passes the full [OATF conformance suite](https://github.com/oatf-spec
 
 ## Minimum Supported Rust Version
 
-The MSRV is **1.85.0** (edition 2024). It is tested in CI and will be bumped
+The MSRV is **1.87.0** (edition 2024). It is tested in CI and will be bumped
 as a minor version change.
 
 ## License

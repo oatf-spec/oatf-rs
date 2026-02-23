@@ -56,7 +56,7 @@ All PRs must pass:
 
 - `cargo fmt --check`
 - `cargo clippy -- -D warnings`
-- `cargo test` on stable, nightly, and MSRV (1.85.0)
+- `cargo test` on stable, nightly, and MSRV (1.87.0)
 - `cargo test --no-default-features` and `--all-features`
 - `cargo deny check`
 - `cargo doc --no-deps` (warnings as errors)
