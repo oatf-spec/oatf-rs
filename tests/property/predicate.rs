@@ -138,7 +138,7 @@ proptest! {
         let mut pred_wrong = HashMap::new();
         pred_wrong.insert("x".to_string(), MatchEntry::Scalar(json!(a)));
         pred_wrong.insert("y".to_string(), MatchEntry::Scalar(json!(b + 1)));
-        let expected = b == b + 1; // overflow wrap — always false for i64 in this range
+        let expected = false; // b != b + 1 for any b in -50..50
         prop_assert_eq!(evaluate_predicate(&pred_wrong, &value), expected);
     }
 

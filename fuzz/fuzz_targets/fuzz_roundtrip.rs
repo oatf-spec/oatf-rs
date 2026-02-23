@@ -23,8 +23,8 @@ fuzz_target!(|data: &[u8]| {
             "Roundtrip failure: serialize produced YAML that cannot be re-parsed.\n\
              Input (lossy): {:?}\n\
              Serialized YAML:\n{}",
-            &s[..s.len().min(200)],
-            &yaml[..yaml.len().min(500)],
+            s.get(..200).unwrap_or(&s),
+            yaml.get(..500).unwrap_or(&yaml),
         );
     }
 });
