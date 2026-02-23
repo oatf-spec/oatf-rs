@@ -44,10 +44,11 @@ struct VerdictExpected {
 
 fn run_verdict_suite(filename: &str) {
     let path = conformance_dir().join(format!("verdict/{}", filename));
-    if !path.exists() {
-        eprintln!("Skipping verdict tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<VerdictCase> = serde_saphyr::from_str(&content).unwrap();

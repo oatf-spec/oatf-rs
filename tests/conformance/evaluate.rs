@@ -11,7 +11,7 @@ fn conformance_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec/conformance"))
 }
 
-// ─── evaluate_pattern ───────────────────────────────────────────────────────
+// --- evaluate_pattern -------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct PatternCase {
@@ -36,10 +36,11 @@ struct PatternIndicatorDef {
 #[test]
 fn evaluate_pattern_suite() {
     let path = conformance_dir().join("evaluate/pattern.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_pattern tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<PatternCase> = serde_saphyr::from_str(&content).unwrap();
@@ -96,7 +97,7 @@ fn parse_pattern_match(value: &Value) -> PatternMatch {
     serde_json::from_value(value.clone()).unwrap()
 }
 
-// ─── evaluate_expression (via evaluate_indicator) ───────────────────────────
+// --- evaluate_expression (via evaluate_indicator) ---------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct ExpressionCase {
@@ -131,10 +132,11 @@ struct ExpressionMatchDef {
 #[test]
 fn evaluate_expression_suite() {
     let path = conformance_dir().join("evaluate/expression.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_expression tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<ExpressionCase> = serde_saphyr::from_str(&content).unwrap();
@@ -223,7 +225,7 @@ fn evaluate_expression_suite() {
     assert_eq!(failed, 0, "{} evaluate_expression tests failed", failed);
 }
 
-// ─── evaluate_indicator semantic ────────────────────────────────────────────
+// --- evaluate_indicator semantic --------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
 struct SemanticCase {
@@ -283,10 +285,11 @@ impl evaluate::SemanticEvaluator for MockSemanticEvaluator {
 #[test]
 fn evaluate_semantic_suite() {
     let path = conformance_dir().join("evaluate/semantic.yaml");
-    if !path.exists() {
-        eprintln!("Skipping evaluate_semantic tests: {:?} not found", path);
-        return;
-    }
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
 
     let content = std::fs::read_to_string(&path).unwrap();
     let cases: Vec<SemanticCase> = serde_saphyr::from_str(&content).unwrap();

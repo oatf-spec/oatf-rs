@@ -11,11 +11,13 @@ fn conformance_dir() -> PathBuf {
 #[test]
 fn parse_valid_fixtures() {
     let valid_dir = conformance_dir().join("parse/valid");
-    if !valid_dir.exists() {
-        eprintln!("Skipping parse valid tests: {:?} not found", valid_dir);
-        return;
-    }
+    assert!(
+        valid_dir.exists(),
+        "Conformance fixture directory not found: {:?}. Is the spec submodule initialized?",
+        valid_dir
+    );
 
+    let mut count = 0;
     for entry in fs::read_dir(&valid_dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
@@ -40,17 +42,21 @@ fn parse_valid_fixtures() {
             path.file_name().unwrap(),
             result.err()
         );
+        count += 1;
     }
+    assert!(count > 0, "No valid parse fixtures found in {:?}", valid_dir);
 }
 
 #[test]
 fn parse_invalid_fixtures() {
     let invalid_dir = conformance_dir().join("parse/invalid");
-    if !invalid_dir.exists() {
-        eprintln!("Skipping parse invalid tests: {:?} not found", invalid_dir);
-        return;
-    }
+    assert!(
+        invalid_dir.exists(),
+        "Conformance fixture directory not found: {:?}. Is the spec submodule initialized?",
+        invalid_dir
+    );
 
+    let mut count = 0;
     for entry in fs::read_dir(&invalid_dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
@@ -74,5 +80,11 @@ fn parse_invalid_fixtures() {
             "Expected parse error for {:?}, but parsed successfully",
             path.file_name().unwrap(),
         );
+        count += 1;
     }
+    assert!(
+        count > 0,
+        "No invalid parse fixtures found in {:?}",
+        invalid_dir
+    );
 }

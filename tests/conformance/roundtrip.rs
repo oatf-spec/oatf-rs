@@ -26,10 +26,11 @@ struct Expected {
 #[test]
 fn roundtrip_conformance_suite() {
     let suite_path = conformance_dir().join("roundtrip/suite.yaml");
-    if !suite_path.exists() {
-        eprintln!("Skipping roundtrip tests: {:?} not found", suite_path);
-        return;
-    }
+    assert!(
+        suite_path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        suite_path
+    );
 
     let content = std::fs::read_to_string(&suite_path).unwrap();
     let cases: Vec<TestCase> = serde_saphyr::from_str(&content).unwrap();
@@ -43,7 +44,7 @@ fn roundtrip_conformance_suite() {
             continue;
         }
 
-        // Step 1: parse → normalize
+        // Step 1: parse -> normalize
         let doc1 = match parse(&case.input) {
             Ok(d) => d,
             Err(e) => {
@@ -67,7 +68,7 @@ fn roundtrip_conformance_suite() {
             }
         };
 
-        // Step 3: parse again → normalize again
+        // Step 3: parse again -> normalize again
         let doc2 = match parse(&yaml1) {
             Ok(d) => d,
             Err(e) => {

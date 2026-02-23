@@ -1,24 +1,40 @@
+use oatf::parse::parse;
+
 #[test]
-fn test_action_key_order() {
-    // Verify that Action deserializer picks first non-extension key
-    let json_str =
-        r#"{"log": {"message": "msg"}, "send_notification": {"method": "m"}, "x-custom": "val"}"#;
+fn action_deserialization_picks_correct_variant() {
+    // Verify that oatf's Action deserializer picks the correct variant
+    // based on the first non-extension key in the YAML map.
+    let yaml = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        on_enter:
+          - log:
+              message: "Phase entered"
+              level: info
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    let doc = parse(yaml).expect("parse should succeed");
+    let actors = doc.attack.execution.phases.unwrap();
+    let actions = actors[0].on_enter.as_ref().unwrap();
+    assert_eq!(actions.len(), 1);
 
-    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json_str).unwrap();
-
-    println!("Keys in insertion order:");
-    for (i, key) in map.keys().enumerate() {
-        println!("  {}: {}", i, key);
-    }
-
-    // The first non-extension key should be "log"
-    let mut first_non_ext = None;
-    for (k, _) in &map {
-        if !k.starts_with("x-") {
-            first_non_ext = Some(k.clone());
-            break;
-        }
-    }
-    println!("First non-extension key: {:?}", first_non_ext);
-    assert_eq!(first_non_ext, Some("log".to_string()));
+    let action_json = serde_json::to_value(&actions[0]).unwrap();
+    assert!(
+        action_json.get("log").is_some(),
+        "Expected 'log' action variant, got: {}",
+        action_json
+    );
 }
