@@ -107,8 +107,8 @@ The normative specification and SDK contract are in the spec submodule:
 
 GitHub Actions workflow at `.github/workflows/ci.yml`:
 - **Lint job**: fmt, clippy, machete, doc, deny, semver-checks (stable only)
-- **Test matrix**: 3 toolchains (stable, nightly, MSRV 1.87.0) × 3 feature sets (default, no-default-features, all-features)
-- MSRV is 1.87.0 (edition 2024 minimum)
+- **Test matrix**: 3 toolchains (stable, nightly, MSRV 1.88.0) × 3 feature sets (default, no-default-features, all-features)
+- MSRV is 1.88.0 (edition 2024 minimum)
 
 ## Commit Convention
 

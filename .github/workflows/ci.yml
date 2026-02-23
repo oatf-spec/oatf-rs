@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly, "1.87.0"]
+        toolchain: [stable, nightly, "1.88.0"]
         features: ["", "--no-default-features", "--all-features"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
