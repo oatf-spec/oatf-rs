@@ -93,19 +93,3 @@ jobs:
         run: cargo install cargo-llvm-cov
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
-      - name: Extract coverage percentage
-        id: cov
-        run: |
-          PCT=$(cargo llvm-cov --all-features --summary-only 2>&1 | grep -oP 'TOTAL\s+\S+\s+\S+\s+(\d+\.\d+)%' | grep -oP '\d+\.\d+' || echo "0")
-          echo "percentage=$PCT" >> "$GITHUB_OUTPUT"
-      - name: Update coverage badge
-        uses: schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483 # v1.7.0
-        with:
-          auth: ${{ secrets.GIST_TOKEN }}
-          gistID: COVERAGE_GIST_ID
-          filename: coverage.json
-          label: coverage
-          message: "${{ steps.cov.outputs.percentage }}%"
-          valColorRange: ${{ steps.cov.outputs.percentage }}
-          minColorRange: 50
-          maxColorRange: 90
