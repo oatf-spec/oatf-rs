@@ -1,0 +1,41 @@
+# Mutation testing exclusions.
+#
+# These patterns suppress low-value mutants that generate noise without
+# improving confidence in the crate's correctness. Patterns are matched
+# against the mutant description shown by `cargo mutants --list`.
+
+exclude_re = [
+    # Display impls — cosmetic formatting, not business logic.
+    "fmt::Display",
+
+    # Internal YAML pre-parse helpers: byte-level string scanners for
+    # anchor/alias detection, comment stripping, block scalar skipping,
+    # and colon finding. Already covered by parse conformance fixtures.
+    "check_yaml_anchors_aliases",
+    "mask_plain_scalar_values",
+    "find_colon_in_yaml",
+    "strip_trailing_comment",
+    "skip_block_scalar",
+    "find_yaml_anchor\\b",
+    "find_yaml_alias",
+    "is_yaml_anchor_char",
+    "strip_yaml_string_literals",
+    "line_introduces_block_scalar",
+    "check_multi_document",
+
+    # Error classification helpers — map error strings to ParseErrorKind.
+    "classify_saphyr_error",
+    "classify_json_error",
+
+    # Internal CEL <-> JSON conversion helpers — tested indirectly
+    # through evaluate_expression conformance tests.
+    "cel_to_json",
+    "json_to_cel",
+
+    # Internal helper for semantic evaluation text extraction.
+    "value_to_text",
+
+    # Extension key validation in parse — covered by parse conformance.
+    "validate_extension_keys",
+    "check_extensions",
+]
