@@ -659,8 +659,7 @@ fn interpolate_value_inner(
     match value {
         Value::String(s) => {
             if s.contains("{{") {
-                let (interpolated, diags) =
-                    interpolate_template(s, extractors, request, response);
+                let (interpolated, diags) = interpolate_template(s, extractors, request, response);
                 diagnostics.extend(diags);
                 Value::String(interpolated)
             } else {
@@ -820,16 +819,9 @@ pub fn evaluate_trigger(
         // 3. Qualifier comparison (if trigger specifies one)
         if let Some(tq) = trigger_qualifier {
             // §5.8 step 2c-i: event.qualifier first, then content-based resolution
-            let resolved = ev
-                .qualifier
-                .clone()
-                .or_else(|| {
-                    crate::event_registry::resolve_event_qualifier(
-                        protocol,
-                        event_base,
-                        &ev.content,
-                    )
-                });
+            let resolved = ev.qualifier.clone().or_else(|| {
+                crate::event_registry::resolve_event_qualifier(protocol, event_base, &ev.content)
+            });
             match resolved {
                 Some(ref eq) if eq == tq => {} // match
                 _ => return TriggerResult::NotAdvanced,

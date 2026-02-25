@@ -1,6 +1,6 @@
 use oatf::primitives;
 use oatf::types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -528,8 +528,7 @@ fn evaluate_extractor_suite() {
             selector: case.input.extractor.selector.clone(),
         };
 
-        let result =
-            primitives::evaluate_extractor(&extractor, &case.input.message, direction);
+        let result = primitives::evaluate_extractor(&extractor, &case.input.message, direction);
 
         if result == case.expected {
             passed += 1;
@@ -685,11 +684,7 @@ fn resolve_event_qualifier_suite() {
         failed,
         cases.len()
     );
-    assert_eq!(
-        failed, 0,
-        "{} resolve_event_qualifier tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} resolve_event_qualifier tests failed", failed);
 }
 
 // --- evaluate_trigger --------------------------------------------------------
