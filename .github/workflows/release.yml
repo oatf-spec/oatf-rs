@@ -60,11 +60,12 @@ jobs:
         uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1.0.3
       - name: Publish
         run: |
-          OUTPUT=$(cargo publish 2>&1) || {
-            if echo "$OUTPUT" | grep -q "already uploaded"; then
-              echo "::notice::Version already published to crates.io — skipping"
+          cargo publish || {
+            VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/oatf/$VERSION")
+            if [ "$STATUS" = "200" ]; then
+              echo "::notice::Version $VERSION already published to crates.io — skipping"
             else
-              echo "$OUTPUT" >&2
               exit 1
             fi
           }
