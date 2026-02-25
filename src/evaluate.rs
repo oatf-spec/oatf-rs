@@ -502,6 +502,23 @@ pub fn compute_verdict(
         }
     }
 
+    // All-skipped → error: no evaluation occurred (§4.5)
+    if skipped > 0 && matched == 0 && not_matched == 0 && error == 0 {
+        return AttackVerdict {
+            attack_id: attack.id.clone(),
+            result: AttackResult::Error,
+            indicator_verdicts: collected_verdicts,
+            evaluation_summary: EvaluationSummary {
+                matched,
+                not_matched,
+                error,
+                skipped,
+            },
+            timestamp: None,
+            source: None,
+        };
+    }
+
     let result = match logic {
         CorrelationLogic::Any => {
             if error > 0 {

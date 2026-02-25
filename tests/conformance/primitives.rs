@@ -1,6 +1,7 @@
 use oatf::primitives;
 use oatf::types::*;
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn conformance_dir() -> PathBuf {
@@ -462,6 +463,8 @@ struct ExtractorCase {
 struct ExtractorInput {
     extractor: ExtractorDef,
     message: Value,
+    #[serde(default)]
+    direction: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -512,6 +515,12 @@ fn evaluate_extractor_suite() {
             }
         };
 
+        // Use fixture `direction` if present, otherwise default to extractor source
+        let direction = match case.input.direction.as_deref() {
+            Some("request") => oatf::enums::ExtractorSource::Request,
+            Some("response") => oatf::enums::ExtractorSource::Response,
+            _ => source.clone(),
+        };
         let extractor = Extractor {
             name: case.input.extractor.name.clone(),
             source,
@@ -519,7 +528,8 @@ fn evaluate_extractor_suite() {
             selector: case.input.extractor.selector.clone(),
         };
 
-        let result = primitives::evaluate_extractor(&extractor, &case.input.message);
+        let result =
+            primitives::evaluate_extractor(&extractor, &case.input.message, direction);
 
         if result == case.expected {
             passed += 1;
@@ -617,4 +627,326 @@ fn compute_effective_state_suite() {
         cases.len()
     );
     assert_eq!(failed, 0, "{} compute_effective_state tests failed", failed);
+}
+
+// --- resolve_event_qualifier -------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct QualifierCase {
+    name: String,
+    id: String,
+    input: QualifierInput,
+    expected: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct QualifierInput {
+    protocol: String,
+    base_event: String,
+    content: Value,
+}
+
+#[test]
+fn resolve_event_qualifier_suite() {
+    let path = conformance_dir().join("primitives/resolve-event-qualifier.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<QualifierCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let result = primitives::resolve_event_qualifier(
+            &case.input.protocol,
+            &case.input.base_event,
+            &case.input.content,
+        );
+
+        if result == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nresolve_event_qualifier: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(
+        failed, 0,
+        "{} resolve_event_qualifier tests failed",
+        failed
+    );
+}
+
+// --- evaluate_trigger --------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerCase {
+    name: String,
+    id: String,
+    input: TriggerInput,
+    expected: TriggerExpected,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerInput {
+    trigger: TriggerDef,
+    event: Option<TriggerEventDef>,
+    elapsed: String,
+    state: TriggerStateDef,
+    protocol: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerDef {
+    #[serde(default)]
+    event: Option<String>,
+    #[serde(default)]
+    count: Option<i64>,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default, rename = "match")]
+    match_predicate: Option<Value>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerEventDef {
+    event_type: String,
+    #[serde(default)]
+    qualifier: Option<String>,
+    content: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerStateDef {
+    event_count: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TriggerExpected {
+    result: String,
+    #[serde(default)]
+    reason: Option<String>,
+    state: TriggerStateDef,
+}
+
+#[test]
+fn evaluate_trigger_suite() {
+    let path = conformance_dir().join("primitives/evaluate-trigger.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<TriggerCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let trigger = Trigger {
+            event: case.input.trigger.event.clone(),
+            count: case.input.trigger.count,
+            after: case.input.trigger.after.clone(),
+            match_predicate: case
+                .input
+                .trigger
+                .match_predicate
+                .as_ref()
+                .map(|v| parse_match_predicate(v)),
+        };
+
+        let event = case.input.event.as_ref().map(|e| ProtocolEvent {
+            event_type: e.event_type.clone(),
+            qualifier: e.qualifier.clone(),
+            content: e.content.clone(),
+        });
+
+        let elapsed = primitives::parse_duration(&case.input.elapsed).unwrap();
+        let mut state = TriggerState {
+            event_count: case.input.state.event_count,
+        };
+
+        let result = primitives::evaluate_trigger(
+            &trigger,
+            event.as_ref(),
+            elapsed,
+            &mut state,
+            &case.input.protocol,
+        );
+
+        let (result_str, reason_str) = match &result {
+            TriggerResult::Advanced { reason } => {
+                let r = match reason {
+                    oatf::enums::AdvanceReason::Timeout => "timeout",
+                    oatf::enums::AdvanceReason::EventMatched => "event_matched",
+                };
+                ("advanced", Some(r))
+            }
+            TriggerResult::NotAdvanced => ("not_advanced", None),
+        };
+
+        let result_ok = result_str == case.expected.result;
+        let reason_ok = match (&case.expected.reason, reason_str) {
+            (Some(expected), Some(actual)) => expected == actual,
+            (None, _) => true,
+            (Some(_), None) => false,
+        };
+        let state_ok = state.event_count == case.expected.state.event_count;
+
+        if result_ok && reason_ok && state_ok {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected result={} reason={:?} state.event_count={}, got result={} reason={:?} state.event_count={}",
+                case.id,
+                case.name,
+                case.expected.result,
+                case.expected.reason,
+                case.expected.state.event_count,
+                result_str,
+                reason_str,
+                state.event_count,
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nevaluate_trigger: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} evaluate_trigger tests failed", failed);
+}
+
+// --- interpolate_value -------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct InterpolateValueCase {
+    name: String,
+    id: String,
+    input: InterpolateValueInput,
+    expected: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct InterpolateValueInput {
+    value: Value,
+    #[serde(default)]
+    extractors: HashMap<String, String>,
+    #[serde(default)]
+    request: Option<Value>,
+    #[serde(default)]
+    response: Option<Value>,
+}
+
+#[test]
+fn interpolate_value_suite() {
+    let path = conformance_dir().join("primitives/interpolate-value.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<InterpolateValueCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let (result, _diagnostics) = primitives::interpolate_value(
+            &case.input.value,
+            &case.input.extractors,
+            case.input.request.as_ref(),
+            case.input.response.as_ref(),
+        );
+
+        if result == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\ninterpolate_value: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} interpolate_value tests failed", failed);
+}
+
+// --- evaluate_extractor direction tests (supplementary) ----------------------
+
+#[test]
+fn extractor_direction_mismatch_request() {
+    let extractor = Extractor {
+        name: "x".to_string(),
+        source: oatf::enums::ExtractorSource::Request,
+        extractor_type: oatf::enums::ExtractorType::JsonPath,
+        selector: "$.name".to_string(),
+    };
+    let result = primitives::evaluate_extractor(
+        &extractor,
+        &json!({"name": "test"}),
+        oatf::enums::ExtractorSource::Response,
+    );
+    assert_eq!(result, None);
+}
+
+#[test]
+fn extractor_direction_mismatch_response() {
+    let extractor = Extractor {
+        name: "x".to_string(),
+        source: oatf::enums::ExtractorSource::Response,
+        extractor_type: oatf::enums::ExtractorType::JsonPath,
+        selector: "$.name".to_string(),
+    };
+    let result = primitives::evaluate_extractor(
+        &extractor,
+        &json!({"name": "test"}),
+        oatf::enums::ExtractorSource::Request,
+    );
+    assert_eq!(result, None);
+}
+
+#[test]
+fn extractor_direction_match_extracts() {
+    let extractor = Extractor {
+        name: "x".to_string(),
+        source: oatf::enums::ExtractorSource::Response,
+        extractor_type: oatf::enums::ExtractorType::JsonPath,
+        selector: "$.name".to_string(),
+    };
+    let result = primitives::evaluate_extractor(
+        &extractor,
+        &json!({"name": "test"}),
+        oatf::enums::ExtractorSource::Response,
+    );
+    assert_eq!(result, Some("test".to_string()));
 }

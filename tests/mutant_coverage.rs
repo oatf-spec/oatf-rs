@@ -280,7 +280,7 @@ fn verdict_skipped_counted_correctly() {
     // i2 has no verdict entry → treated as skipped
 
     let result = compute_verdict(&attack, &verdicts);
-    assert_eq!(result.result, AttackResult::NotExploited);
+    assert_eq!(result.result, AttackResult::Error);
     assert_eq!(result.evaluation_summary.skipped, 2);
     assert_eq!(result.evaluation_summary.matched, 0);
 }

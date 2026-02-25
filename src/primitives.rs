@@ -12,6 +12,8 @@ use std::time::Duration;
 
 // Re-export extract_protocol from event_registry (§5.10)
 pub use crate::event_registry::extract_protocol;
+// Re-export resolve_event_qualifier from event_registry (§7)
+pub use crate::event_registry::resolve_event_qualifier;
 
 // ─── §5.1.1 resolve_simple_path ─────────────────────────────────────────────
 
@@ -466,9 +468,20 @@ pub fn evaluate_predicate(predicate: &MatchPredicate, value: &Value) -> bool {
                         if resolved.is_some() {
                             return false;
                         }
-                        // exists: false is satisfied; other operators are
-                        // irrelevant (AND with false-on-resolved = always false
-                        // for value-inspecting ops when path didn't resolve)
+                        // §5.4: exists: false with no other operators → true;
+                        // exists: false with other operators → false
+                        let has_other_ops = cond.contains.is_some()
+                            || cond.starts_with.is_some()
+                            || cond.ends_with.is_some()
+                            || cond.regex.is_some()
+                            || cond.any_of.is_some()
+                            || cond.gt.is_some()
+                            || cond.lt.is_some()
+                            || cond.gte.is_some()
+                            || cond.lte.is_some();
+                        if has_other_ops {
+                            return false;
+                        }
                     }
                     MatchCondition {
                         exists: Some(true), ..
@@ -619,6 +632,64 @@ fn w004_diagnostic(expr: &str) -> Diagnostic {
     }
 }
 
+// ─── §5.5a interpolate_value ─────────────────────────────────────────────────
+
+/// Recursively walks a JSON value tree and interpolates template expressions
+/// in all string leaves that contain `{{`.
+///
+/// Returns a new `Value` with all templates resolved and aggregated diagnostics.
+pub fn interpolate_value(
+    value: &Value,
+    extractors: &HashMap<String, String>,
+    request: Option<&Value>,
+    response: Option<&Value>,
+) -> (Value, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+    let result = interpolate_value_inner(value, extractors, request, response, &mut diagnostics);
+    (result, diagnostics)
+}
+
+fn interpolate_value_inner(
+    value: &Value,
+    extractors: &HashMap<String, String>,
+    request: Option<&Value>,
+    response: Option<&Value>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Value {
+    match value {
+        Value::String(s) => {
+            if s.contains("{{") {
+                let (interpolated, diags) =
+                    interpolate_template(s, extractors, request, response);
+                diagnostics.extend(diags);
+                Value::String(interpolated)
+            } else {
+                value.clone()
+            }
+        }
+        Value::Object(map) => {
+            let new_map: serde_json::Map<String, Value> = map
+                .iter()
+                .map(|(k, v)| {
+                    let new_v =
+                        interpolate_value_inner(v, extractors, request, response, diagnostics);
+                    (k.clone(), new_v)
+                })
+                .collect();
+            Value::Object(new_map)
+        }
+        Value::Array(arr) => {
+            let new_arr: Vec<Value> = arr
+                .iter()
+                .map(|v| interpolate_value_inner(v, extractors, request, response, diagnostics))
+                .collect();
+            Value::Array(new_arr)
+        }
+        // Null, Bool, Number — pass through unchanged
+        _ => value.clone(),
+    }
+}
+
 // ─── §5.6 evaluate_extractor ────────────────────────────────────────────────
 
 /// Applies an extractor to a message, capturing a value.
@@ -626,8 +697,19 @@ fn w004_diagnostic(expr: &str) -> Diagnostic {
 /// - `json_path`: Evaluate JSONPath; return first match serialized to compact JSON.
 /// - `regex`: Evaluate regex; return first capture group value.
 ///
+/// The `direction` parameter indicates whether the message is a request or
+/// response. If it does not match the extractor's `source` field, `None` is
+/// returned immediately (the extractor does not apply to this direction).
+///
 /// Returns `None` for no match. `Some("")` is a valid result.
-pub fn evaluate_extractor(extractor: &Extractor, message: &Value) -> Option<String> {
+pub fn evaluate_extractor(
+    extractor: &Extractor,
+    message: &Value,
+    direction: crate::enums::ExtractorSource,
+) -> Option<String> {
+    if extractor.source != direction {
+        return None;
+    }
     match extractor.extractor_type {
         crate::enums::ExtractorType::JsonPath => {
             evaluate_extractor_jsonpath(&extractor.selector, message)
@@ -702,11 +784,19 @@ pub fn select_response<'a>(
 // ─── §5.8 evaluate_trigger ──────────────────────────────────────────────────
 
 /// Evaluates whether a trigger condition is satisfied for phase advancement.
+///
+/// `protocol` identifies the wire protocol (e.g. `"mcp"`, `"a2a"`, `"ag_ui"`)
+/// and is used to key the qualifier resolution registry.
+///
+/// `state` is a mutable reference to per-trigger state that persists across
+/// calls. The SDK increments `state.event_count` only when the incoming event
+/// fully matches (base type + qualifier + predicate).
 pub fn evaluate_trigger(
     trigger: &Trigger,
     event: Option<&ProtocolEvent>,
     elapsed: Duration,
-    event_count: usize,
+    state: &mut TriggerState,
+    protocol: &str,
 ) -> TriggerResult {
     // 1. Check timeout
     if let Some(after) = &trigger.after
@@ -720,24 +810,46 @@ pub fn evaluate_trigger(
 
     // 2. Check event match
     if let (Some(trigger_event), Some(ev)) = (&trigger.event, event) {
-        let (trigger_base, _) = parse_event_qualifier(trigger_event);
+        let (trigger_base, trigger_qualifier) = parse_event_qualifier(trigger_event);
         let (event_base, _) = parse_event_qualifier(&ev.event_type);
 
-        if trigger_base == event_base {
-            // Check match predicate if present
-            if let Some(predicate) = &trigger.match_predicate
-                && !evaluate_predicate(predicate, &ev.content)
-            {
-                return TriggerResult::NotAdvanced;
-            }
+        if trigger_base != event_base {
+            return TriggerResult::NotAdvanced;
+        }
 
-            // Check count
-            let required_count = trigger.count.unwrap_or(1) as usize;
-            if event_count + 1 >= required_count {
-                return TriggerResult::Advanced {
-                    reason: AdvanceReason::EventMatched,
-                };
+        // 3. Qualifier comparison (if trigger specifies one)
+        if let Some(tq) = trigger_qualifier {
+            // §5.8 step 2c-i: event.qualifier first, then content-based resolution
+            let resolved = ev
+                .qualifier
+                .clone()
+                .or_else(|| {
+                    crate::event_registry::resolve_event_qualifier(
+                        protocol,
+                        event_base,
+                        &ev.content,
+                    )
+                });
+            match resolved {
+                Some(ref eq) if eq == tq => {} // match
+                _ => return TriggerResult::NotAdvanced,
             }
+        }
+
+        // 4. Check match predicate if present
+        if let Some(predicate) = &trigger.match_predicate
+            && !evaluate_predicate(predicate, &ev.content)
+        {
+            return TriggerResult::NotAdvanced;
+        }
+
+        // 5. Full match — increment count, then check threshold
+        state.event_count += 1;
+        let required_count = trigger.count.unwrap_or(1) as u64;
+        if state.event_count >= required_count {
+            return TriggerResult::Advanced {
+                reason: AdvanceReason::EventMatched,
+            };
         }
     }
 
