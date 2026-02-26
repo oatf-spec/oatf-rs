@@ -545,6 +545,20 @@ pub enum TriggerResult {
     NotAdvanced,
 }
 
+// ─── §2.8c TriggerState ─────────────────────────────────────────────────────
+
+/// Mutable per-trigger state tracked across successive `evaluate_trigger` calls.
+///
+/// The caller should create one `TriggerState` per trigger and pass it by
+/// mutable reference on every evaluation. The SDK increments `event_count`
+/// only when the incoming event fully matches (base type + qualifier +
+/// predicate), which prevents the over-count bug inherent in external counting.
+#[derive(Clone, Debug, Default)]
+pub struct TriggerState {
+    /// Number of events that have fully matched so far.
+    pub event_count: u64,
+}
+
 // ─── §2.9 Extractor ─────────────────────────────────────────────────────────
 
 /// A data extractor that captures values from protocol messages.
