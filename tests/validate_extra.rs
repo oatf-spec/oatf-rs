@@ -25,6 +25,18 @@ fn assert_has_error(input: &str, rule: &str) {
     );
 }
 
+/// Helper: parse then validate, return warnings matching a specific code.
+fn warnings_for(input: &str, code: &str) -> Vec<String> {
+    let doc = parse(input).expect("parse should succeed");
+    let result = validate(&doc);
+    result
+        .warnings
+        .iter()
+        .filter(|w| w.code == code)
+        .map(|w| w.message.clone())
+        .collect()
+}
+
 // ─── V-021: Wildcard dot-path syntax ────────────────────────────────────────
 
 #[test]
@@ -633,4 +645,196 @@ attack:
         contains: "test"
 "#;
     assert_has_error(input, "V-007");
+}
+
+// ─── V-019: Trigger count constraints ───────────────────────────────────────
+
+#[test]
+fn v019_trigger_count_zero_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        trigger:
+          event: tools/call
+          count: 0
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-019");
+}
+
+#[test]
+fn v019_trigger_count_negative_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        trigger:
+          event: tools/call
+          count: -1
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-019");
+}
+
+// ─── V-016: Template syntax in on_enter ─────────────────────────────────────
+
+#[test]
+fn v016_unclosed_template_in_on_enter_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        on_enter:
+          - log:
+              message: "started {{unclosed"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-016");
+}
+
+// ─── V-032 / W-004: Single-phase template reference checks ──────────────────
+
+#[test]
+fn v032_single_phase_unknown_actor_reference_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools:
+        - name: t1
+          description: "use {{ghost.extractor}}"
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-032");
+}
+
+#[test]
+fn w004_single_phase_undeclared_extractor_warns() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools:
+        - name: t1
+          description: "use {{missing_extractor}}"
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    let warnings = warnings_for(input, "W-004");
+    assert!(
+        !warnings.is_empty(),
+        "undeclared extractor in single-phase state should emit W-004"
+    );
+}
+
+// ─── V-044: Regex extractor capture group ───────────────────────────────────
+
+#[test]
+fn v044_regex_with_literal_parenthesis_and_no_group_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        extractors:
+          - name: lit
+            source: request
+            type: regex
+            selector: "[(]"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-044");
+}
+
+// ─── Parse strictness: malformed pattern operator types ─────────────────────
+
+#[test]
+fn parse_rejects_shorthand_pattern_wrong_type() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: []
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: 123
+"#;
+    assert!(parse(input).is_err(), "contains:number must fail parse");
+}
+
+#[test]
+fn parse_rejects_condition_operator_wrong_type() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: []
+  indicators:
+    - surface: tool_description
+      pattern:
+        condition:
+          contains: 123
+"#;
+    assert!(
+        parse(input).is_err(),
+        "pattern.condition.contains:number must fail parse"
+    );
 }

@@ -808,37 +808,61 @@ impl<'de> Deserialize<'de> for PatternMatch {
             .as_object()
             .ok_or_else(|| serde::de::Error::custom("pattern must be an object"))?;
 
-        let target = map
-            .get("target")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let condition = map.get("condition").map(|v| {
-            // Condition can be a bare value or a MatchCondition object
-            Condition::from_value(v.clone())
-        });
+        let parse_opt_string = |key: &str| -> Result<Option<String>, D::Error> {
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.clone())),
+                Some(v) => Err(serde::de::Error::custom(format!(
+                    "pattern.{} must be a string, got {}",
+                    key, v
+                ))),
+            }
+        };
+
+        let parse_opt_number = |key: &str| -> Result<Option<f64>, D::Error> {
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v.as_f64().map(Some).ok_or_else(|| {
+                    serde::de::Error::custom(format!("pattern.{} must be a number, got {}", key, v))
+                }),
+            }
+        };
+
+        let target = match map.get("target") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(v) => {
+                return Err(serde::de::Error::custom(format!(
+                    "pattern.target must be a string, got {}",
+                    v
+                )));
+            }
+        };
+
+        let condition = match map.get("condition") {
+            Some(v) => Some(parse_condition_strict(v.clone()).map_err(serde::de::Error::custom)?),
+            None => None,
+        };
 
         // Shorthand operator fields
-        let contains = map
-            .get("contains")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let starts_with = map
-            .get("starts_with")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let ends_with = map
-            .get("ends_with")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let regex = map
-            .get("regex")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let any_of = map.get("any_of").and_then(|v| v.as_array()).cloned();
-        let gt = map.get("gt").and_then(|v| v.as_f64());
-        let lt = map.get("lt").and_then(|v| v.as_f64());
-        let gte = map.get("gte").and_then(|v| v.as_f64());
-        let lte = map.get("lte").and_then(|v| v.as_f64());
+        let contains = parse_opt_string("contains")?;
+        let starts_with = parse_opt_string("starts_with")?;
+        let ends_with = parse_opt_string("ends_with")?;
+        let regex = parse_opt_string("regex")?;
+        let any_of = match map.get("any_of") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(arr)) => Some(arr.clone()),
+            Some(v) => {
+                return Err(serde::de::Error::custom(format!(
+                    "pattern.any_of must be an array, got {}",
+                    v
+                )));
+            }
+        };
+        let gt = parse_opt_number("gt")?;
+        let lt = parse_opt_number("lt")?;
+        let gte = parse_opt_number("gte")?;
+        let lte = parse_opt_number("lte")?;
 
         Ok(PatternMatch {
             target,
@@ -853,6 +877,33 @@ impl<'de> Deserialize<'de> for PatternMatch {
             gte,
             lte,
         })
+    }
+}
+
+fn parse_condition_strict(v: Value) -> Result<Condition, String> {
+    match &v {
+        Value::Object(map) => {
+            let operator_keys = [
+                "contains",
+                "starts_with",
+                "ends_with",
+                "regex",
+                "any_of",
+                "gt",
+                "lt",
+                "gte",
+                "lte",
+                "exists",
+            ];
+            if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
+                let cond: MatchCondition = serde_json::from_value(v)
+                    .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
+                Ok(Condition::Operators(cond))
+            } else {
+                Ok(Condition::Equality(v))
+            }
+        }
+        _ => Ok(Condition::Equality(v)),
     }
 }
 

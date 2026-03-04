@@ -44,9 +44,7 @@ fn attack_with_indicators(logic: CorrelationLogic, indicator_ids: &[&str]) -> At
             extensions: HashMap::new(),
         },
         indicators: Some(indicators),
-        correlation: Some(Correlation {
-            logic: Some(logic),
-        }),
+        correlation: Some(Correlation { logic: Some(logic) }),
         extensions: HashMap::new(),
     }
 }

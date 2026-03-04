@@ -837,7 +837,8 @@ pub fn evaluate_trigger(
 
         // 5. Full match — increment count, then check threshold
         state.event_count += 1;
-        let required_count = trigger.count.unwrap_or(1) as u64;
+        // Defensive clamp for callers that bypass validate(): count must be >= 1.
+        let required_count = trigger.count.unwrap_or(1).max(1) as u64;
         if state.event_count >= required_count {
             return TriggerResult::Advanced {
                 reason: AdvanceReason::EventMatched,

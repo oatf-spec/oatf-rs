@@ -26,7 +26,11 @@ attack:
     match &doc.attack.severity {
         Some(Severity::Object { level, confidence }) => {
             assert_eq!(format!("{:?}", level), "High");
-            assert_eq!(*confidence, Some(50), "confidence should be defaulted to 50");
+            assert_eq!(
+                *confidence,
+                Some(50),
+                "confidence should be defaulted to 50"
+            );
         }
         other => panic!("expected Severity::Object, got {:?}", other),
     }
@@ -58,7 +62,12 @@ attack:
     let doc = parse(input).expect("parse should succeed");
     let doc = normalize(doc);
 
-    let actors = doc.attack.execution.actors.as_ref().expect("actors should exist");
+    let actors = doc
+        .attack
+        .execution
+        .actors
+        .as_ref()
+        .expect("actors should exist");
     assert_eq!(actors.len(), 1);
     assert_eq!(actors[0].name, "attacker");
 }
@@ -87,7 +96,12 @@ attack:
     let doc = parse(input).expect("parse should succeed");
     let doc = normalize(doc);
 
-    let actors = doc.attack.execution.actors.as_ref().expect("actors should exist");
+    let actors = doc
+        .attack
+        .execution
+        .actors
+        .as_ref()
+        .expect("actors should exist");
     assert_eq!(actors.len(), 1);
     assert_eq!(actors[0].name, "custom-actor");
 }

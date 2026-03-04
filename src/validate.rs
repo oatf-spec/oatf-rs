@@ -568,6 +568,16 @@ fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
                     errors,
                 );
             }
+            if let Some(actions) = &phase.on_enter {
+                for (ai, action) in actions.iter().enumerate() {
+                    let action_value = serde_json::to_value(action).unwrap_or_default();
+                    check_templates_in_value(
+                        &action_value,
+                        &format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
+                        errors,
+                    );
+                }
+            }
         }
     }
 }
@@ -694,15 +704,25 @@ fn v018_surface_protocol(
 fn v019_count_match_require_event(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger
-                && trigger.event.is_none()
-                && (trigger.count.is_some() || trigger.match_predicate.is_some())
-            {
-                errors.push(verr(
-                    "V-019",
-                    format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
-                    "trigger.count and trigger.match require event to be present",
-                ));
+            if let Some(trigger) = &phase.trigger {
+                if trigger.event.is_none()
+                    && (trigger.count.is_some() || trigger.match_predicate.is_some())
+                {
+                    errors.push(verr(
+                        "V-019",
+                        format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
+                        "trigger.count and trigger.match require event to be present",
+                    ));
+                }
+                if let Some(count) = trigger.count
+                    && count < 1
+                {
+                    errors.push(verr(
+                        "V-019",
+                        format!("{}.phases[{}].trigger.count", actor_info.path_prefix, pi),
+                        format!("trigger.count must be >= 1, got {}", count),
+                    ));
+                }
             }
         }
     }
@@ -1283,7 +1303,11 @@ fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
             set
         };
 
-    // Scan all template strings in the document for {{actor_name.extractor_name}} references
+    // Scan all template strings in the document for {{actor_name.extractor_name}} references.
+    // Handle single-phase form directly.
+    if let Some(state) = &doc.attack.execution.state {
+        check_cross_actor_refs_in_value(state, &actor_names, "attack.execution.state", errors);
+    }
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(state) = &phase.state {
@@ -1911,19 +1935,9 @@ fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<Validatio
 
 /// Check if a regex pattern contains at least one unescaped capture group.
 fn has_capture_group(pattern: &str) -> bool {
-    let bytes = pattern.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2; // skip escaped character
-            continue;
-        }
-        if bytes[i] == b'(' && (i + 1 >= bytes.len() || bytes[i + 1] != b'?') {
-            return true;
-        }
-        i += 1;
-    }
-    false
+    Regex::new(pattern)
+        .map(|re| re.captures_len() > 1)
+        .unwrap_or(false)
 }
 
 // ─── V-045 ──────────────────────────────────────────────────────────────────
@@ -1969,6 +1983,20 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
             set.insert("default".to_string());
             set
         };
+
+    // Single-phase form has no phase-local extractor declarations.
+    if let Some(state) = &doc.attack.execution.state {
+        let declared = std::collections::HashSet::new();
+        if check_undeclared_refs_in_value(state, &declared, &actor_names) {
+            warnings.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "W-004".to_string(),
+                path: None,
+                message: "template references undeclared extractor".to_string(),
+            });
+            return; // Emit once per document
+        }
+    }
 
     for actor_info in collect_actors(doc) {
         for phase in actor_info.phases.iter() {
