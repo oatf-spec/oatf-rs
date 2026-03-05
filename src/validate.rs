@@ -469,6 +469,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
     // Also check regex in match predicates (triggers and response entries)
     validate_regex_in_phases(doc, errors);
+    validate_regex_in_state_when_predicates(doc, errors);
 }
 
 fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
@@ -494,6 +495,61 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
                 }
             }
         }
+    }
+}
+
+fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
+    // Handle single-phase form directly
+    if let Some(state) = &doc.attack.execution.state {
+        scan_when_predicates_for_regex(state, "attack.execution.state", errors);
+    }
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                scan_when_predicates_for_regex(
+                    state,
+                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
+                    errors,
+                );
+            }
+        }
+    }
+}
+
+fn scan_when_predicates_for_regex(
+    value: &serde_json::Value,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(when_val) = map.get("when")
+                && let Some(pred_map) = when_val.as_object()
+            {
+                for (key, entry) in pred_map {
+                    if let Some(entry_obj) = entry.as_object()
+                        && let Some(re_val) = entry_obj.get("regex")
+                        && let Some(re) = re_val.as_str()
+                        && let Err(e) = Regex::new(re)
+                    {
+                        errors.push(verr(
+                            "V-013",
+                            format!("{}.when.{}.regex", path, key),
+                            format!("invalid regex: {}", e),
+                        ));
+                    }
+                }
+            }
+            for (k, v) in map {
+                scan_when_predicates_for_regex(v, &format!("{}.{}", path, k), errors);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                scan_when_predicates_for_regex(v, &format!("{}[{}]", path, i), errors);
+            }
+        }
+        _ => {}
     }
 }
 

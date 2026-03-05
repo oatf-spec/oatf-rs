@@ -174,7 +174,10 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
             continue;
         }
 
-        let in_content = strip_yaml_string_literals(trimmed);
+        // Strip inline comments before scanning for forbidden YAML features.
+        // This avoids false positives on comment text like `# <<:` or `# &anchor`.
+        let no_comment = strip_trailing_comment(trimmed);
+        let in_content = strip_yaml_string_literals(no_comment);
 
         // Check for merge keys
         if in_content.contains("<<:") || in_content.contains("<< :") {

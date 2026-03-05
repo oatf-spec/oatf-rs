@@ -426,6 +426,14 @@ impl<'de> Deserialize<'de> for Action {
                 let obj = value.as_object().ok_or_else(|| {
                     serde::de::Error::custom("send_notification must be an object")
                 })?;
+                for field in obj.keys() {
+                    if field != "method" && field != "params" {
+                        return Err(serde::de::Error::custom(format!(
+                            "send_notification has unknown field '{}'",
+                            field
+                        )));
+                    }
+                }
                 let method = obj
                     .get("method")
                     .and_then(|v| v.as_str())
@@ -443,6 +451,14 @@ impl<'de> Deserialize<'de> for Action {
                 let obj = value
                     .as_object()
                     .ok_or_else(|| serde::de::Error::custom("log must be an object"))?;
+                for field in obj.keys() {
+                    if field != "message" && field != "level" {
+                        return Err(serde::de::Error::custom(format!(
+                            "log has unknown field '{}'",
+                            field
+                        )));
+                    }
+                }
                 let message = obj
                     .get("message")
                     .and_then(|v| v.as_str())
@@ -464,6 +480,18 @@ impl<'de> Deserialize<'de> for Action {
                 let obj = value.as_object().ok_or_else(|| {
                     serde::de::Error::custom("send_elicitation must be an object")
                 })?;
+                for field in obj.keys() {
+                    if field != "message"
+                        && field != "mode"
+                        && field != "requestedSchema"
+                        && field != "url"
+                    {
+                        return Err(serde::de::Error::custom(format!(
+                            "send_elicitation has unknown field '{}'",
+                            field
+                        )));
+                    }
+                }
                 let message = obj
                     .get("message")
                     .and_then(|v| v.as_str())

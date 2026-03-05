@@ -838,3 +838,111 @@ attack:
         "pattern.condition.contains:number must fail parse"
     );
 }
+
+// ─── Parse: inline comments must not trigger V-020 scanners ─────────────────
+
+#[test]
+fn parse_allows_inline_comment_with_merge_marker_text() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: [] # docs mention <<: merge syntax here
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert!(
+        parse(input).is_ok(),
+        "inline comment containing <<: should not fail parse"
+    );
+}
+
+#[test]
+fn parse_allows_inline_comment_with_anchor_text_on_flow_value() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: [1] # &anchor text in comment
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert!(
+        parse(input).is_ok(),
+        "inline comment containing &name should not fail parse"
+    );
+}
+
+// ─── V-013: Regex in response `when` predicates ─────────────────────────────
+
+#[test]
+fn v013_invalid_regex_in_response_when_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools:
+            - name: tool1
+              description: ""
+              responses:
+                - when:
+                    arguments.command:
+                      regex: "[unterminated"
+                  content:
+                    - type: text
+                      text: "ok"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-013");
+}
+
+// ─── Parse strictness: known action inner object fields ─────────────────────
+
+#[test]
+fn parse_rejects_unknown_field_inside_known_action_payload() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools: []
+        on_enter:
+          - send_notification:
+              method: "notifications/tools/list_changed"
+              typo: true
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert!(
+        parse(input).is_err(),
+        "unknown inner fields on known actions must fail parse"
+    );
+}
