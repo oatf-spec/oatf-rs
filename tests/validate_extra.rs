@@ -949,6 +949,109 @@ attack:
     assert_has_error(input, "V-013");
 }
 
+#[test]
+fn v027_invalid_key_in_response_when_rejected() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools:
+            - name: tool1
+              description: ""
+              responses:
+                - when:
+                    "bad key":
+                      exists: true
+                  content:
+                    - type: text
+                      text: "ok"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-027");
+}
+
+#[test]
+fn v027_ignores_non_response_when_object() {
+    let input = r##"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools:
+            - name: tool1
+              description: ""
+              inputSchema:
+                type: object
+                properties:
+                  when:
+                    $ref: "#/defs/input"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"##;
+    let errs = errors_for(input, "V-027");
+    assert!(
+        errs.is_empty(),
+        "non-response `when` objects must not trigger V-027: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn v013_ignores_non_response_when_object() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    phases:
+      - name: phase-1
+        state:
+          tools:
+            - name: tool1
+              description: ""
+              inputSchema:
+                type: object
+                properties:
+                  when:
+                    foo:
+                      regex: "[unterminated"
+        trigger:
+          event: tools/call
+      - name: phase-2
+        description: "Terminal."
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    let errs = errors_for(input, "V-013");
+    assert!(
+        errs.is_empty(),
+        "non-response `when` objects must not trigger V-013: {:?}",
+        errs
+    );
+}
+
 // ─── Parse strictness: known action inner object fields ─────────────────────
 
 #[test]

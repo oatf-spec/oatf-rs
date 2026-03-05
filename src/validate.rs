@@ -498,59 +498,84 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
+fn for_each_state_response_entry<F>(doc: &Document, mut visit: F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
     if let Some(state) = &doc.attack.execution.state {
-        scan_when_predicates_for_regex(state, "attack.execution.state", errors);
+        for_each_response_entry_in_state(state, "attack.execution.state", &mut visit);
     }
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(state) = &phase.state {
-                scan_when_predicates_for_regex(
+                for_each_response_entry_in_state(
                     state,
                     &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
+                    &mut visit,
                 );
             }
         }
     }
 }
 
-fn scan_when_predicates_for_regex(
-    value: &serde_json::Value,
-    path: &str,
-    errors: &mut Vec<ValidationError>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(when_val) = map.get("when")
-                && let Some(pred_map) = when_val.as_object()
-            {
-                for (key, entry) in pred_map {
-                    if let Some(entry_obj) = entry.as_object()
-                        && let Some(re_val) = entry_obj.get("regex")
-                        && let Some(re) = re_val.as_str()
-                        && let Err(e) = Regex::new(re)
-                    {
-                        errors.push(verr(
-                            "V-013",
-                            format!("{}.when.{}.regex", path, key),
-                            format!("invalid regex: {}", e),
-                        ));
-                    }
+fn for_each_response_entry_in_state<F>(state: &serde_json::Value, path: &str, visit: &mut F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
+    let Some(obj) = state.as_object() else {
+        return;
+    };
+
+    if let Some(tools) = obj.get("tools").and_then(|v| v.as_array()) {
+        for (ti, tool) in tools.iter().enumerate() {
+            if let Some(responses) = tool.get("responses").and_then(|v| v.as_array()) {
+                for (ri, entry) in responses.iter().enumerate() {
+                    visit(entry, &format!("{}.tools[{}].responses[{}]", path, ti, ri));
                 }
             }
-            for (k, v) in map {
-                scan_when_predicates_for_regex(v, &format!("{}.{}", path, k), errors);
-            }
         }
-        serde_json::Value::Array(arr) => {
-            for (i, v) in arr.iter().enumerate() {
-                scan_when_predicates_for_regex(v, &format!("{}[{}]", path, i), errors);
-            }
-        }
-        _ => {}
     }
+
+    if let Some(prompts) = obj.get("prompts").and_then(|v| v.as_array()) {
+        for (pi, prompt) in prompts.iter().enumerate() {
+            if let Some(responses) = prompt.get("responses").and_then(|v| v.as_array()) {
+                for (ri, entry) in responses.iter().enumerate() {
+                    visit(
+                        entry,
+                        &format!("{}.prompts[{}].responses[{}]", path, pi, ri),
+                    );
+                }
+            }
+        }
+    }
+
+    if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in task_responses.iter().enumerate() {
+            visit(entry, &format!("{}.task_responses[{}]", path, ri));
+        }
+    }
+}
+
+fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for_each_state_response_entry(doc, |entry, path| {
+        if let Some(when_val) = entry.get("when")
+            && let Some(pred_map) = when_val.as_object()
+        {
+            for (key, pred_entry) in pred_map {
+                if let Some(entry_obj) = pred_entry.as_object()
+                    && let Some(re_val) = entry_obj.get("regex")
+                    && let Some(re) = re_val.as_str()
+                    && let Err(e) = Regex::new(re)
+                {
+                    errors.push(verr(
+                        "V-013",
+                        format!("{}.when.{}.regex", path, key),
+                        format!("invalid regex: {}", e),
+                    ));
+                }
+            }
+        }
+    });
 }
 
 // ─── V-014 ──────────────────────────────────────────────────────────────────
@@ -1106,62 +1131,28 @@ fn v027_match_predicate_paths(doc: &Document, errors: &mut Vec<ValidationError>)
     }
 
     // Check response entry `when` predicate keys in state values
-    // This is a deep check into state values which we do best-effort
     check_when_predicates_in_state(doc, errors);
 }
 
 fn check_when_predicates_in_state(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        scan_when_predicates(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                scan_when_predicates(
-                    state,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
-            }
-        }
-    }
-}
-
-/// Walk a state value looking for response entries with `when` predicates
-/// and validate that their keys are valid simple dot-paths.
-fn scan_when_predicates(value: &serde_json::Value, path: &str, errors: &mut Vec<ValidationError>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            // Check if this object has a "when" key whose value is a map (predicate)
-            if let Some(when_val) = map.get("when")
-                && let Some(pred_map) = when_val.as_object()
-            {
-                for key in pred_map.keys() {
-                    if !is_valid_simple_dot_path(key) {
-                        errors.push(verr(
-                            "V-027",
-                            format!("{}.when.{}", path, key),
-                            format!(
-                                "match predicate key must be a valid simple dot-path, got '{}'",
-                                key
-                            ),
-                        ));
-                    }
+    for_each_state_response_entry(doc, |entry, path| {
+        if let Some(when_val) = entry.get("when")
+            && let Some(pred_map) = when_val.as_object()
+        {
+            for key in pred_map.keys() {
+                if !is_valid_simple_dot_path(key) {
+                    errors.push(verr(
+                        "V-027",
+                        format!("{}.when.{}", path, key),
+                        format!(
+                            "match predicate key must be a valid simple dot-path, got '{}'",
+                            key
+                        ),
+                    ));
                 }
             }
-            // Recurse into all values
-            for (k, v) in map {
-                scan_when_predicates(v, &format!("{}.{}", path, k), errors);
-            }
         }
-        serde_json::Value::Array(arr) => {
-            for (i, v) in arr.iter().enumerate() {
-                scan_when_predicates(v, &format!("{}[{}]", path, i), errors);
-            }
-        }
-        _ => {}
-    }
+    });
 }
 
 // ─── V-028 ──────────────────────────────────────────────────────────────────

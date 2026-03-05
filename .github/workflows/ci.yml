@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly, "1.88.0"]
-        features: ["", "--no-default-features", "--all-features"]
+        features: ["", "--no-default-features", "--no-default-features --features cel-validate", "--all-features"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
