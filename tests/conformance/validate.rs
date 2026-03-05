@@ -95,8 +95,8 @@ fn validate_conformance_suite() {
             }
         } else if let Some(expected_errors) = &case.expected.errors {
             if result.errors.is_empty() {
-                // V-014 CEL syntax validation requires the cel-eval feature
-                #[cfg(not(feature = "cel-eval"))]
+                // V-014 CEL syntax validation requires the cel-validate feature
+                #[cfg(not(feature = "cel-validate"))]
                 if expected_errors.iter().any(|e| e.rule == "V-014") {
                     skipped += 1;
                     continue;

@@ -613,6 +613,40 @@ attack:
     assert!(errs.is_empty(), "valid regex should not error: {:?}", errs);
 }
 
+// ─── V-014: CEL syntax validation feature split ─────────────────────────────
+
+fn input_with_invalid_cel_expression() -> &'static str {
+    r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: []
+  indicators:
+    - surface: tool_description
+      expression:
+        cel: "message.content.contains("
+"#
+}
+
+#[cfg(feature = "cel-validate")]
+#[test]
+fn v014_invalid_cel_rejected_when_cel_validate_enabled() {
+    assert_has_error(input_with_invalid_cel_expression(), "V-014");
+}
+
+#[cfg(not(feature = "cel-validate"))]
+#[test]
+fn v014_invalid_cel_not_checked_when_cel_validate_disabled() {
+    let errs = errors_for(input_with_invalid_cel_expression(), "V-014");
+    assert!(
+        errs.is_empty(),
+        "V-014 should be skipped when cel-validate is disabled, got: {:?}",
+        errs
+    );
+}
+
 // ─── V-006: Indicators non-empty ────────────────────────────────────────────
 
 #[test]

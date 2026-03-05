@@ -14,7 +14,8 @@ exclude = ["spec/", "fuzz/", ".github/"]
 
 [features]
 default = ["cel-eval"]
-cel-eval = ["dep:cel"]
+cel-validate = ["dep:cel"]
+cel-eval = ["cel-validate"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }

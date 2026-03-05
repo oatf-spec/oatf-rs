@@ -35,13 +35,21 @@ let yaml_out = serialize(&normalized).unwrap();
 
 | Feature    | Default | Description |
 |------------|---------|-------------|
-| `cel-eval` | yes     | CEL expression evaluation via the [`cel`](https://crates.io/crates/cel) crate. Enables `DefaultCelEvaluator`. |
+| `cel-validate` | yes | CEL expression syntax validation (`V-014`) via the [`cel`](https://crates.io/crates/cel) crate parser. |
+| `cel-eval` | yes     | Default CEL expression evaluation via the [`cel`](https://crates.io/crates/cel) crate. Enables `DefaultCelEvaluator`. |
 
-To disable CEL evaluation (reduces dependencies):
+To disable all CEL support (reduces dependencies):
 
 ```toml
 [dependencies]
 oatf = { version = "0.1", default-features = false }
+```
+
+To keep CEL syntax validation but provide your own evaluator:
+
+```toml
+[dependencies]
+oatf = { version = "0.1", default-features = false, features = ["cel-validate"] }
 ```
 
 ## Pipeline

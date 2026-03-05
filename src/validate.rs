@@ -556,7 +556,7 @@ fn scan_when_predicates_for_regex(
 // ─── V-014 ──────────────────────────────────────────────────────────────────
 
 fn v014_cel_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
-    #[cfg(feature = "cel-eval")]
+    #[cfg(feature = "cel-validate")]
     {
         if let Some(indicators) = &doc.attack.indicators {
             for (i, ind) in indicators.iter().enumerate() {
@@ -572,6 +572,11 @@ fn v014_cel_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
                 }
             }
         }
+    }
+
+    #[cfg(not(feature = "cel-validate"))]
+    {
+        let _ = (doc, errors);
     }
 }
 

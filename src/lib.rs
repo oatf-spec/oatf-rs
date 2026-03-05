@@ -42,7 +42,8 @@
 //!
 //! | Feature    | Default | Description |
 //! |------------|---------|-------------|
-//! | `cel-eval` | yes     | CEL expression evaluation via the [`cel`] crate. Enables [`evaluate::DefaultCelEvaluator`]. |
+//! | `cel-validate` | yes | CEL expression syntax validation (`V-014`) via the [`cel`] crate parser. |
+//! | `cel-eval` | yes     | Default CEL expression evaluation via the [`cel`] crate. Enables [`evaluate::DefaultCelEvaluator`]. |
 
 pub mod enums;
 pub mod error;
