@@ -92,51 +92,76 @@ struct WildcardSegment {
     wildcard: bool,
 }
 
+/// Check whether a character is valid within a dot-path segment.
+/// Segments may contain ASCII alphanumerics, underscores, and hyphens.
+fn is_path_segment_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+/// Parse a wildcard dot-path into segments, validating syntax and character set.
+///
+/// This is the single shared parser used by both the validator
+/// (`is_valid_wildcard_dot_path`) and the runtime resolver
+/// (`resolve_wildcard_path`). Returns `None` for any syntax error.
 fn split_wildcard_segments(path: &str) -> Option<Vec<WildcardSegment>> {
     let mut segments = Vec::new();
     let mut current = String::new();
     let chars: Vec<char> = path.chars().collect();
     let mut i = 0;
+    let mut expect_segment = true; // tracks whether we need a new segment name next
 
     while i < chars.len() {
         match chars[i] {
             '.' => {
-                if current.is_empty() && segments.is_empty() {
-                    return None; // leading dot
-                }
                 if !current.is_empty() {
                     segments.push(WildcardSegment {
                         name: current.clone(),
                         wildcard: false,
                     });
                     current.clear();
+                } else if !expect_segment {
+                    // Previous token was [*] which already consumed the dot — this is fine
+                } else {
+                    return None; // leading dot or double dot
                 }
+                expect_segment = true;
                 i += 1;
             }
             '[' => {
                 // Must be [*]
                 if i + 2 < chars.len() && chars[i + 1] == '*' && chars[i + 2] == ']' {
+                    // [*] at the start of the path is invalid
+                    if current.is_empty() && segments.is_empty() {
+                        return None;
+                    }
                     segments.push(WildcardSegment {
                         name: current.clone(),
                         wildcard: true,
                     });
                     current.clear();
                     i += 3;
+                    expect_segment = false;
                     // After [*], must be . or end
                     if i < chars.len() {
                         if chars[i] == '.' {
+                            expect_segment = true;
                             i += 1;
                         } else {
                             return None;
                         }
                     }
+                } else if i + 1 < chars.len() && chars[i + 1] == '-' {
+                    return None; // Negative index
                 } else {
-                    return None;
+                    return None; // Invalid bracket content
                 }
             }
-            c => {
+            c if is_path_segment_char(c) => {
                 current.push(c);
                 i += 1;
+            }
+            _ => {
+                return None; // Invalid character
             }
         }
     }
@@ -146,9 +171,42 @@ fn split_wildcard_segments(path: &str) -> Option<Vec<WildcardSegment>> {
             name: current,
             wildcard: false,
         });
+    } else if expect_segment && !segments.is_empty() {
+        // Trailing dot (expect_segment is true but nothing followed)
+        return None;
     }
 
     Some(segments)
+}
+
+/// Validate wildcard dot-path syntax per §5.1.2.
+///
+/// Accepts paths like `tools[*].name`, `content`, or `""` (root).
+/// Rejects invalid characters, leading/trailing dots, double dots,
+/// numeric indices, and leading wildcards.
+pub fn is_valid_wildcard_dot_path(path: &str) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    split_wildcard_segments(path).is_some()
+}
+
+/// Validate simple dot-path syntax per §5.1.1.
+/// No wildcards or numeric indices allowed.
+pub fn is_valid_simple_dot_path(path: &str) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    let segments: Vec<&str> = path.split('.').collect();
+    for seg in &segments {
+        if seg.is_empty() {
+            return false;
+        }
+        if !seg.chars().all(is_path_segment_char) {
+            return false;
+        }
+    }
+    true
 }
 
 // ─── §5.2 parse_duration ────────────────────────────────────────────────────

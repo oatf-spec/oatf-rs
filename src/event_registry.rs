@@ -9,6 +9,7 @@ pub struct EventModeEntry {
 
 /// The v0.1 Event-Mode Validity Registry as a compile-time constant.
 /// Each event maps to the set of modes for which it is valid.
+/// Source: format specification §7 Event-Mode Validity Matrix.
 pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     // MCP events
     EventModeEntry {
@@ -48,8 +49,12 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
+        event: "resources/templates/list",
+        valid_modes: &["mcp_server", "mcp_client"],
+    },
+    EventModeEntry {
         event: "completion/complete",
-        valid_modes: &["mcp_server"],
+        valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
         event: "sampling/createMessage",
@@ -61,7 +66,7 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/get",
-        valid_modes: &["mcp_server", "mcp_client", "a2a_server"],
+        valid_modes: &["mcp_server", "mcp_client", "a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "tasks/result",
@@ -69,11 +74,11 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/list",
-        valid_modes: &["mcp_server"],
+        valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
         event: "tasks/cancel",
-        valid_modes: &["mcp_server", "a2a_server"],
+        valid_modes: &["mcp_server", "mcp_client", "a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "roots/list",
@@ -81,6 +86,18 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "ping",
+        valid_modes: &["mcp_server", "mcp_client"],
+    },
+    EventModeEntry {
+        event: "notifications/initialized",
+        valid_modes: &["mcp_server"],
+    },
+    EventModeEntry {
+        event: "notifications/roots/list_changed",
+        valid_modes: &["mcp_server"],
+    },
+    EventModeEntry {
+        event: "notifications/cancelled",
         valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
@@ -107,6 +124,14 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         event: "notifications/elicitation/complete",
         valid_modes: &["mcp_client"],
     },
+    EventModeEntry {
+        event: "notifications/message",
+        valid_modes: &["mcp_client"],
+    },
+    EventModeEntry {
+        event: "notifications/progress",
+        valid_modes: &["mcp_client"],
+    },
     // A2A events
     EventModeEntry {
         event: "message/send",
@@ -118,15 +143,27 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/resubscribe",
-        valid_modes: &["a2a_server"],
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
-        event: "tasks/pushNotification/set",
-        valid_modes: &["a2a_server"],
+        event: "tasks/pushNotificationConfig/set",
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
-        event: "tasks/pushNotification/get",
-        valid_modes: &["a2a_server"],
+        event: "tasks/pushNotificationConfig/get",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "tasks/pushNotificationConfig/list",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "tasks/pushNotificationConfig/delete",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "agent/getAuthenticatedExtendedCard",
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "agent_card/get",
@@ -186,6 +223,10 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
+        event: "tool_call_result",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
         event: "state_snapshot",
         valid_modes: &["ag_ui_client"],
     },
@@ -198,7 +239,43 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
-        event: "interrupt",
+        event: "activity_snapshot",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "activity_delta",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_start",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_start",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_content",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_end",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_chunk",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_end",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_encrypted_value",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "raw",
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {

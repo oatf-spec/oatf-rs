@@ -1,4 +1,4 @@
-//! Document validation against conformance rules V-001 through V-045.
+//! Document validation against conformance rules V-001 through V-046.
 //!
 //! Returns **all** errors and warnings, not just the first. Validation does not
 //! modify the document.
@@ -7,6 +7,7 @@ use crate::error::*;
 use crate::event_registry::{
     extract_protocol, infer_execution_protocol, is_event_valid_for_mode, strip_event_qualifier,
 };
+use crate::primitives::{is_valid_simple_dot_path, is_valid_wildcard_dot_path};
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
@@ -99,7 +100,7 @@ static CEL_ID_RE: LazyLock<Regex> =
 
 static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
-/// Validate a parsed document against all 45 conformance rules (V-001..V-045).
+/// Validate a parsed document against all conformance rules (V-001..V-046).
 /// Returns a ValidationResult containing all errors and warnings found.
 pub fn validate(doc: &Document) -> ValidationResult {
     let mut errors = Vec::new();
@@ -882,139 +883,8 @@ fn v021_target_path_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-/// Validate wildcard dot-path syntax per §5.1.2.
-///
-/// Valid: `tools[*].description`, `content[*]`, `arguments`, `""`, `status.state`,
-///        `2xx-status`, `0foo.bar`
-///
-/// Invalid: `tools[*.description` (missing bracket), `tools..name` (double dot),
-///          `[*]tools` (leading bracket), `tools[*].[*]` (bracket after dot-bracket),
-///          `tools[-1]` (negative index)
-pub fn is_valid_wildcard_dot_path(path: &str) -> bool {
-    if path.is_empty() {
-        return true; // Empty string targets root
-    }
-
-    // Split on dots, but respect [*] as atomic suffix
-    let segments = split_wildcard_path(path);
-    if segments.is_none() {
-        return false;
-    }
-    let segments = segments.unwrap();
-    if segments.is_empty() {
-        return false;
-    }
-    for seg in &segments {
-        if seg.is_empty() {
-            return false; // empty segment (double dot)
-        }
-    }
-    true
-}
-
-/// Split a wildcard dot-path into segments, validating syntax.
-/// Returns None if invalid.
-fn split_wildcard_path(path: &str) -> Option<Vec<String>> {
-    if path.is_empty() {
-        return Some(vec![]);
-    }
-
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = path.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        match chars[i] {
-            '.' => {
-                if current.is_empty() && !segments.is_empty() {
-                    // Double dot or leading dot after segment — check for trailing [*] on prev segment
-                    return None;
-                }
-                if current.is_empty() && segments.is_empty() {
-                    return None; // Leading dot
-                }
-                segments.push(current.clone());
-                current.clear();
-                i += 1;
-            }
-            '[' => {
-                // Must be followed by * or digit(s) and ]
-                if i + 2 < chars.len() && chars[i + 1] == '*' && chars[i + 2] == ']' {
-                    current.push_str("[*]");
-                    i += 3;
-                    // After [*], must be followed by . or end
-                    if i < chars.len() {
-                        if chars[i] == '.' {
-                            segments.push(current.clone());
-                            current.clear();
-                            i += 1;
-                        } else {
-                            return None; // Invalid char after [*]
-                        }
-                    }
-                } else if i + 1 < chars.len() && chars[i + 1] == '-' {
-                    return None; // Negative index
-                } else {
-                    return None; // Invalid bracket content
-                }
-            }
-            c if is_path_segment_char(c) => {
-                current.push(c);
-                i += 1;
-            }
-            _ => {
-                return None; // Invalid character
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        segments.push(current);
-    } else if !segments.is_empty() {
-        // Trailing dot
-        return None;
-    }
-
-    // Validate that the path doesn't start with [
-    if let Some(first) = segments.first()
-        && first.starts_with('[')
-    {
-        return None;
-    }
-
-    Some(segments)
-}
-
-fn is_path_segment_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '-'
-}
-
-/// Validate simple dot-path syntax per §5.1.1.
-/// No wildcards or numeric indices allowed.
-pub fn is_valid_simple_dot_path(path: &str) -> bool {
-    if path.is_empty() {
-        return true; // Empty string targets root
-    }
-
-    let segments: Vec<&str> = path.split('.').collect();
-    if segments.is_empty() {
-        return false;
-    }
-    for seg in &segments {
-        if seg.is_empty() {
-            return false; // double dot or leading/trailing dot
-        }
-        // Each segment must be alphanumeric, underscores, hyphens
-        if !seg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
-            return false;
-        }
-    }
-    true
-}
+// Path validation functions (is_valid_wildcard_dot_path, is_valid_simple_dot_path)
+// are defined in primitives.rs and imported above.
 
 // ─── V-022 ──────────────────────────────────────────────────────────────────
 

@@ -82,7 +82,7 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
     SurfaceEntry {
         surface: "server_notification",
         protocol: "mcp",
-        default_target: "params",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "server_capability",
@@ -188,7 +188,7 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
     SurfaceEntry {
         surface: "task_message",
         protocol: "a2a",
-        default_target: "messages[*]",
+        default_target: "parts[*]",
     },
     SurfaceEntry {
         surface: "task_artifact",
@@ -227,14 +227,19 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
         default_target: "forwardedProps",
     },
     SurfaceEntry {
+        surface: "agent_context",
+        protocol: "ag_ui",
+        default_target: "context[*]",
+    },
+    SurfaceEntry {
         surface: "agent_event",
         protocol: "ag_ui",
-        default_target: "data",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "agent_tool_call",
         protocol: "ag_ui",
-        default_target: "data",
+        default_target: "",
     },
 ];
 

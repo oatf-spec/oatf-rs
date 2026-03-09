@@ -679,6 +679,7 @@ pub static MATCH_OPERATOR_KEYS: &[&str] = &[
 
 /// Operator-based match condition for field comparison.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MatchCondition {
     /// String containment check.
     #[serde(skip_serializing_if = "Option::is_none")]
