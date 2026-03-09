@@ -4,7 +4,7 @@
 //! and resolves shorthand patterns. `normalize(normalize(doc)) == normalize(doc)`.
 
 use crate::enums::*;
-use crate::event_registry::extract_protocol;
+use crate::event_registry::infer_execution_protocol;
 use crate::surface::lookup_surface;
 use crate::types::*;
 
@@ -95,24 +95,7 @@ fn n001_defaults(doc: &mut Document) {
 
     // indicator.protocol → protocol component of resolved mode
     if let Some(indicators) = &mut attack.indicators {
-        let exec_protocol = attack
-            .execution
-            .mode
-            .as_deref()
-            .map(extract_protocol)
-            .map(|s| s.to_string());
-
-        // In multi-actor form after normalization, we may not have execution.mode
-        // If actors exist, check for a single default actor
-        let actor_protocol = attack.execution.actors.as_ref().and_then(|actors| {
-            if actors.len() == 1 {
-                Some(extract_protocol(&actors[0].mode).to_string())
-            } else {
-                None
-            }
-        });
-
-        let default_protocol = exec_protocol.or(actor_protocol);
+        let default_protocol = infer_execution_protocol(&attack.execution);
 
         for ind in indicators.iter_mut() {
             if ind.protocol.is_none()

@@ -315,3 +315,21 @@ pub fn extract_protocol(mode: &str) -> &str {
         mode
     }
 }
+
+/// Infer the single implicit protocol for the execution block.
+///
+/// Tries `execution.mode` first, then falls back to the single actor's mode
+/// in multi-actor form.  Returns `None` when the protocol is ambiguous
+/// (multiple actors with potentially different protocols).
+pub fn infer_execution_protocol(execution: &crate::types::Execution) -> Option<String> {
+    if let Some(mode) = &execution.mode {
+        return Some(extract_protocol(mode).to_string());
+    }
+    execution.actors.as_ref().and_then(|actors| {
+        if actors.len() == 1 {
+            Some(extract_protocol(&actors[0].mode).to_string())
+        } else {
+            None
+        }
+    })
+}

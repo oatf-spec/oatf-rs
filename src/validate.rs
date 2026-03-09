@@ -4,7 +4,9 @@
 //! modify the document.
 
 use crate::error::*;
-use crate::event_registry::{extract_protocol, is_event_valid_for_mode, strip_event_qualifier};
+use crate::event_registry::{
+    extract_protocol, infer_execution_protocol, is_event_valid_for_mode, strip_event_qualifier,
+};
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
@@ -800,20 +802,11 @@ fn v018_surface_protocol(
                 continue;
             }
             let entry = entry.unwrap();
+            let inferred = infer_execution_protocol(&doc.attack.execution);
             let protocol = ind
                 .protocol
                 .as_deref()
-                .or_else(|| doc.attack.execution.mode.as_deref().map(extract_protocol))
-                .or_else(|| {
-                    // Multi-actor form: infer from single actor's mode
-                    doc.attack.execution.actors.as_ref().and_then(|actors| {
-                        if actors.len() == 1 {
-                            Some(extract_protocol(&actors[0].mode))
-                        } else {
-                            None
-                        }
-                    })
-                });
+                .or(inferred.as_deref());
             if let Some(proto) = protocol
                 && KNOWN_PROTOCOLS.contains(&proto)
                 && entry.protocol != proto

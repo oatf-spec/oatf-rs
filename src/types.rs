@@ -644,19 +644,7 @@ impl<'de> Deserialize<'de> for MatchEntry {
         match &value {
             Value::Object(map) => {
                 // Check if it looks like a MatchCondition (has operator keys)
-                let operator_keys = [
-                    "contains",
-                    "starts_with",
-                    "ends_with",
-                    "regex",
-                    "any_of",
-                    "gt",
-                    "lt",
-                    "gte",
-                    "lte",
-                    "exists",
-                ];
-                if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
+                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
                     let cond: MatchCondition =
                         serde_json::from_value(value).map_err(serde::de::Error::custom)?;
                     Ok(MatchEntry::Condition(cond))
@@ -670,6 +658,24 @@ impl<'de> Deserialize<'de> for MatchEntry {
 }
 
 // ─── §2.11 MatchCondition ───────────────────────────────────────────────────
+
+/// The set of recognized match-condition operator key names.
+///
+/// Used to distinguish a MatchCondition object from a bare-value equality
+/// check during deserialization of `MatchEntry`, `Condition`, and
+/// `PatternMatch.condition`.
+pub static MATCH_OPERATOR_KEYS: &[&str] = &[
+    "contains",
+    "starts_with",
+    "ends_with",
+    "regex",
+    "any_of",
+    "gt",
+    "lt",
+    "gte",
+    "lte",
+    "exists",
+];
 
 /// Operator-based match condition for field comparison.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -923,19 +929,7 @@ impl<'de> Deserialize<'de> for PatternMatch {
 fn parse_condition_strict(v: Value) -> Result<Condition, String> {
     match &v {
         Value::Object(map) => {
-            let operator_keys = [
-                "contains",
-                "starts_with",
-                "ends_with",
-                "regex",
-                "any_of",
-                "gt",
-                "lt",
-                "gte",
-                "lte",
-                "exists",
-            ];
-            if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
+            if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
                 let cond: MatchCondition = serde_json::from_value(v)
                     .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
                 Ok(Condition::Operators(cond))
@@ -960,19 +954,7 @@ impl Condition {
     pub fn from_value(v: Value) -> Self {
         match &v {
             Value::Object(map) => {
-                let operator_keys = [
-                    "contains",
-                    "starts_with",
-                    "ends_with",
-                    "regex",
-                    "any_of",
-                    "gt",
-                    "lt",
-                    "gte",
-                    "lte",
-                    "exists",
-                ];
-                if map.keys().any(|k| operator_keys.contains(&k.as_str()))
+                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
                     && let Ok(cond) = serde_json::from_value::<MatchCondition>(v.clone())
                 {
                     return Condition::Operators(cond);
