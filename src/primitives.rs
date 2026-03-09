@@ -322,51 +322,44 @@ pub fn evaluate_condition(condition: &Condition, value: &Value) -> bool {
 /// Evaluate a MatchCondition (set of operators) against a value with AND logic.
 pub fn evaluate_match_condition(cond: &MatchCondition, value: &Value) -> bool {
     // Each present operator must pass (AND logic)
-    if let Some(ref s) = cond.contains {
-        match value.as_str() {
-            Some(v) => {
-                if !v.contains(s.as_str()) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
+    // Coerce value to string once for all string operators.
+    // For strings this is a clone; for numbers/bools/null/objects/arrays it
+    // produces a canonical text representation (e.g. "42", "true", compact JSON).
+    let need_string_op = cond.contains.is_some()
+        || cond.starts_with.is_some()
+        || cond.ends_with.is_some()
+        || cond.regex.is_some();
+    let text = if need_string_op {
+        Some(value_to_string(value))
+    } else {
+        None
+    };
+
+    if let Some(ref s) = cond.contains
+        && !text.as_ref().unwrap().contains(s.as_str())
+    {
+        return false;
     }
 
-    if let Some(ref s) = cond.starts_with {
-        match value.as_str() {
-            Some(v) => {
-                if !v.starts_with(s.as_str()) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
+    if let Some(ref s) = cond.starts_with
+        && !text.as_ref().unwrap().starts_with(s.as_str())
+    {
+        return false;
     }
 
-    if let Some(ref s) = cond.ends_with {
-        match value.as_str() {
-            Some(v) => {
-                if !v.ends_with(s.as_str()) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
+    if let Some(ref s) = cond.ends_with
+        && !text.as_ref().unwrap().ends_with(s.as_str())
+    {
+        return false;
     }
 
     if let Some(ref pattern) = cond.regex {
-        match value.as_str() {
-            Some(v) => {
-                if let Ok(re) = Regex::new(pattern) {
-                    if !re.is_match(v) {
-                        return false;
-                    }
-                } else {
-                    return false; // invalid regex → false
-                }
+        if let Ok(re) = Regex::new(pattern) {
+            if !re.is_match(text.as_ref().unwrap()) {
+                return false;
             }
-            None => return false,
+        } else {
+            return false; // invalid regex → false
         }
     }
 

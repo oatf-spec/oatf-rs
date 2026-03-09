@@ -289,6 +289,8 @@ pub enum Action {
         requested_schema: Option<Value>,
         /// URL for url-mode elicitation.
         url: Option<String>,
+        /// Elicitation identifier.
+        elicitation_id: Option<String>,
         /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
         /// Number of non-extension keys in the original object (for V-043).
@@ -355,6 +357,7 @@ impl Serialize for Action {
                 mode,
                 requested_schema,
                 url,
+                elicitation_id,
                 extensions,
                 ..
             } => {
@@ -372,6 +375,9 @@ impl Serialize for Action {
                 }
                 if let Some(u) = url {
                     inner.insert("url".to_string(), Value::String(u.clone()));
+                }
+                if let Some(eid) = elicitation_id {
+                    inner.insert("elicitationId".to_string(), Value::String(eid.clone()));
                 }
                 outer.serialize_entry("send_elicitation", &Value::Object(inner))?;
                 for (k, v) in extensions {
@@ -485,6 +491,7 @@ impl<'de> Deserialize<'de> for Action {
                         && field != "mode"
                         && field != "requestedSchema"
                         && field != "url"
+                        && field != "elicitationId"
                     {
                         return Err(serde::de::Error::custom(format!(
                             "send_elicitation has unknown field '{}'",
@@ -507,11 +514,16 @@ impl<'de> Deserialize<'de> for Action {
                     .get("url")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let elicitation_id = obj
+                    .get("elicitationId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 Ok(Action::SendElicitation {
                     message,
                     mode,
                     requested_schema,
                     url,
+                    elicitation_id,
                     extensions,
                     non_ext_key_count,
                 })

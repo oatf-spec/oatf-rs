@@ -55,7 +55,7 @@ pub mod serialize;
 pub mod types;
 pub mod validate;
 
-pub(crate) mod event_registry;
+pub mod event_registry;
 pub(crate) mod surface;
 
 pub use error::*;

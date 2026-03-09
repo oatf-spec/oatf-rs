@@ -896,6 +896,213 @@ fn interpolate_value_suite() {
     assert_eq!(failed, 0, "{} interpolate_value tests failed", failed);
 }
 
+// --- extract_protocol --------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct ExtractProtocolCase {
+    name: String,
+    id: String,
+    input: ExtractProtocolInput,
+    expected: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExtractProtocolInput {
+    mode: String,
+}
+
+#[test]
+fn extract_protocol_suite() {
+    let path = conformance_dir().join("primitives/extract-protocol.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<ExtractProtocolCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let result = oatf::event_registry::extract_protocol(&case.input.mode);
+
+        if result == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nextract_protocol: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} extract_protocol tests failed", failed);
+}
+
+// --- parse_event_qualifier ---------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct ParseEventQualifierCase {
+    name: String,
+    id: String,
+    input: ParseEventQualifierInput,
+    expected: ParseEventQualifierExpected,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ParseEventQualifierInput {
+    event_string: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ParseEventQualifierExpected {
+    base: String,
+    qualifier: Option<String>,
+}
+
+#[test]
+fn parse_event_qualifier_suite() {
+    let path = conformance_dir().join("primitives/parse-event-qualifier.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<ParseEventQualifierCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let (base, qualifier) = primitives::parse_event_qualifier(&case.input.event_string);
+
+        let base_ok = base == case.expected.base;
+        let qualifier_ok = match &case.expected.qualifier {
+            Some(q) => qualifier == Some(q.as_str()),
+            None => qualifier.is_none(),
+        };
+
+        if base_ok && qualifier_ok {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected base={:?} qualifier={:?}, got base={:?} qualifier={:?}",
+                case.id, case.name, case.expected.base, case.expected.qualifier, base, qualifier
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nparse_event_qualifier: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(
+        failed, 0,
+        "{} parse_event_qualifier tests failed",
+        failed
+    );
+}
+
+// --- select_response ---------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseCase {
+    name: String,
+    id: String,
+    input: SelectResponseInput,
+    expected: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseInput {
+    entries: Vec<SelectResponseEntryDef>,
+    request: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseEntryDef {
+    #[serde(default)]
+    when: Option<Value>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, Value>,
+}
+
+#[test]
+fn select_response_suite() {
+    let path = conformance_dir().join("primitives/select-response.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<SelectResponseCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        // Build ResponseEntry from test input
+        let entries: Vec<ResponseEntry> = case
+            .input
+            .entries
+            .iter()
+            .map(|e| {
+                let when = e.when.as_ref().map(|v| parse_match_predicate(v));
+                ResponseEntry {
+                    when,
+                    synthesize: None,
+                    extra: e.extra.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                }
+            })
+            .collect();
+
+        let result = primitives::select_response(&entries, &case.input.request);
+
+        let result_value = match result {
+            Some(entry) => {
+                // Reconstruct the value to compare: take extra fields
+                Value::Object(entry.extra.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            }
+            None => Value::Null,
+        };
+
+        if result_value == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result_value
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nselect_response: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} select_response tests failed", failed);
+}
+
 // --- evaluate_extractor direction tests (supplementary) ----------------------
 
 #[test]

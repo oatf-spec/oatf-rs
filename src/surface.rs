@@ -95,6 +95,41 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
         default_target: "serverInfo",
     },
     SurfaceEntry {
+        surface: "tool_title",
+        protocol: "mcp",
+        default_target: "tools[*].title",
+    },
+    SurfaceEntry {
+        surface: "tool_icons",
+        protocol: "mcp",
+        default_target: "tools[*].icons",
+    },
+    SurfaceEntry {
+        surface: "resource_title",
+        protocol: "mcp",
+        default_target: "resources[*].title",
+    },
+    SurfaceEntry {
+        surface: "resource_icons",
+        protocol: "mcp",
+        default_target: "resources[*].icons",
+    },
+    SurfaceEntry {
+        surface: "prompt_title",
+        protocol: "mcp",
+        default_target: "prompts[*].title",
+    },
+    SurfaceEntry {
+        surface: "prompt_icons",
+        protocol: "mcp",
+        default_target: "prompts[*].icons",
+    },
+    SurfaceEntry {
+        surface: "server_instructions",
+        protocol: "mcp",
+        default_target: "instructions",
+    },
+    SurfaceEntry {
         surface: "sampling_request",
         protocol: "mcp",
         default_target: "params",

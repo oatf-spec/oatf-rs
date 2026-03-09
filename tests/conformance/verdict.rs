@@ -40,6 +40,16 @@ struct VerdictEntry {
 #[derive(Debug, serde::Deserialize)]
 struct VerdictExpected {
     result: String,
+    #[serde(default)]
+    evaluation_summary: Option<EvalSummaryExpected>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EvalSummaryExpected {
+    matched: i64,
+    not_matched: i64,
+    error: i64,
+    skipped: i64,
 }
 
 fn run_verdict_suite(filename: &str) {
@@ -153,14 +163,26 @@ fn run_verdict_suite(filename: &str) {
             AttackResult::Error => "error",
         };
 
-        if result_str == case.expected.result {
+        let result_ok = result_str == case.expected.result;
+        let summary_ok = match &case.expected.evaluation_summary {
+            Some(es) => {
+                verdict.evaluation_summary.matched == es.matched
+                    && verdict.evaluation_summary.not_matched == es.not_matched
+                    && verdict.evaluation_summary.error == es.error
+                    && verdict.evaluation_summary.skipped == es.skipped
+            }
+            None => true,
+        };
+
+        if result_ok && summary_ok {
             passed += 1;
         } else {
             eprintln!(
-                "  FAIL [{}] {}: expected {}, got {} (summary: matched={}, not_matched={}, error={}, skipped={})",
+                "  FAIL [{}] {}: expected result={} summary={:?}, got result={} summary=matched={} not_matched={} error={} skipped={}",
                 case.id,
                 case.name,
                 case.expected.result,
+                case.expected.evaluation_summary,
                 result_str,
                 verdict.evaluation_summary.matched,
                 verdict.evaluation_summary.not_matched,

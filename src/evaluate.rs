@@ -99,14 +99,16 @@ impl CelEvaluator for DefaultCelEvaluator {
 
         match program.execute(&cel_ctx) {
             Ok(result) => Ok(cel_to_json(&result)),
-            Err(cel::ExecutionError::NoSuchKey(_)) => {
-                // Missing fields produce not_matched per §4.1
-                Ok(Value::Bool(false))
-            }
-            Err(cel::ExecutionError::UndeclaredReference(_)) => {
-                // Undeclared references treated as missing → not_matched
-                Ok(Value::Bool(false))
-            }
+            Err(cel::ExecutionError::NoSuchKey(ref key)) => Err(EvaluationError {
+                kind: EvaluationErrorKind::CelError,
+                message: format!("CEL missing field: {}", key),
+                indicator_id: None,
+            }),
+            Err(cel::ExecutionError::UndeclaredReference(ref name)) => Err(EvaluationError {
+                kind: EvaluationErrorKind::CelError,
+                message: format!("CEL undeclared reference: {}", name),
+                indicator_id: None,
+            }),
             Err(ref e @ cel::ExecutionError::NotSupportedAsMethod { .. }) => Err(EvaluationError {
                 kind: EvaluationErrorKind::UnsupportedMethod,
                 message: format!("CEL unsupported method: {}", e),

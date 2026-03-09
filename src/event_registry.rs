@@ -103,6 +103,10 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         event: "notifications/tasks/status",
         valid_modes: &["mcp_client"],
     },
+    EventModeEntry {
+        event: "notifications/elicitation/complete",
+        valid_modes: &["mcp_client"],
+    },
     // A2A events
     EventModeEntry {
         event: "message/send",
@@ -171,6 +175,10 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tool_call_start",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "tool_call_args",
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
@@ -245,6 +253,11 @@ static QUALIFIER_RESOLUTION_REGISTRY: &[QualifierResolutionEntry] = &[
     QualifierResolutionEntry {
         protocol: "ag_ui",
         event: "tool_call_start",
+        content_path: "toolCallName",
+    },
+    QualifierResolutionEntry {
+        protocol: "ag_ui",
+        event: "tool_call_args",
         content_path: "toolCallName",
     },
     QualifierResolutionEntry {

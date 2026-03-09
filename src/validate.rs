@@ -8,6 +8,7 @@ use crate::event_registry::{extract_protocol, is_event_valid_for_mode, strip_eve
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
+use serde_json::Value;
 use std::sync::LazyLock;
 
 // ─── Helper: construct ValidationError with auto-populated spec_ref ─────────
@@ -68,6 +69,7 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-043" => "§5.2",
         "V-044" => "§5.5",
         "V-045" => "§5.2",
+        "V-046" => "§4.2",
         _ => "",
     }
 }
@@ -151,6 +153,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v043_binding_specific_action_keys(doc, &mut errors);
     v044_regex_extractor_capture_group(doc, &mut errors);
     v045_on_enter_non_empty(doc, &mut errors);
+    v046_phase_mode_matches_actor(doc, &mut errors);
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
@@ -225,28 +228,54 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-005 ──────────────────────────────────────────────────────────────────
 
 fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // V-005 validates execution.mode pattern; V-036 validates actor/phase modes.
-    if let Some(mode) = &doc.attack.execution.mode
-        && !MODE_RE.is_match(mode)
-    {
-        errors.push(verr(
-            "V-005",
-            "attack.execution.mode",
-            format!(
-                "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                mode
-            ),
-        ));
-    }
+    // Validate elicitation_responses action enum in state
+    let check_elicitation_responses = |state: &Value, path_prefix: &str, errors: &mut Vec<ValidationError>| {
+        if let Some(entries) = state.get("elicitation_responses").and_then(|v| v.as_array()) {
+            static VALID_ELICITATION_ACTIONS: &[&str] = &["accept", "decline", "cancel"];
+            for (ei, entry) in entries.iter().enumerate() {
+                if let Some(action) = entry.get("action").and_then(|v| v.as_str())
+                    && !VALID_ELICITATION_ACTIONS.contains(&action)
+                {
+                    errors.push(verr(
+                        "V-005",
+                        format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                        format!(
+                            "invalid elicitation_responses action: '{}', must be one of: accept, decline, cancel",
+                            action
+                        ),
+                    ));
+                }
+            }
+        }
+    };
 
-    if let Some(indicators) = &doc.attack.indicators {
-        for (i, ind) in indicators.iter().enumerate() {
-            if lookup_surface(&ind.surface).is_none() {
-                errors.push(verr(
-                    "V-005",
-                    format!("attack.indicators[{}].surface", i),
-                    format!("unknown surface: '{}'", ind.surface),
-                ));
+    // Check execution.state
+    if let Some(state) = &doc.attack.execution.state {
+        check_elicitation_responses(state, "attack.execution.state", errors);
+    }
+    // Check phase states
+    if let Some(phases) = &doc.attack.execution.phases {
+        for (pi, phase) in phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                check_elicitation_responses(
+                    state,
+                    &format!("attack.execution.phases[{}].state", pi),
+                    errors,
+                );
+            }
+        }
+    }
+    // Check actor phase states
+    if let Some(actors) = &doc.attack.execution.actors {
+        for (ai, actor) in actors.iter().enumerate() {
+            for (pi, phase) in actor.phases.iter().enumerate() {
+                if let Some(state) = &phase.state {
+                    check_elicitation_responses(
+                        state,
+                        &format!("attack.execution.actors[{}].phases[{}].state", ai, pi),
+                        errors,
+                    );
+                }
             }
         }
     }
@@ -753,6 +782,16 @@ fn v018_surface_protocol(
 ) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
+            let entry = lookup_surface(&ind.surface);
+            if entry.is_none() {
+                errors.push(verr(
+                    "V-018",
+                    format!("attack.indicators[{}].surface", i),
+                    format!("unknown surface: '{}'", ind.surface),
+                ));
+                continue;
+            }
+            let entry = entry.unwrap();
             let protocol = ind
                 .protocol
                 .as_deref()
@@ -769,7 +808,6 @@ fn v018_surface_protocol(
                 });
             if let Some(proto) = protocol
                 && KNOWN_PROTOCOLS.contains(&proto)
-                && let Some(entry) = lookup_surface(&ind.surface)
                 && entry.protocol != proto
             {
                 errors.push(verr(
@@ -1396,7 +1434,17 @@ fn check_cross_actor_refs_in_value(
         }
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors);
+                // "responses" array is reported as singular "response" per spec
+                if k == "responses" {
+                    if let Some(arr) = v.as_array() {
+                        let child_path = format!("{}.response", path);
+                        for item in arr {
+                            check_cross_actor_refs_in_value(item, actor_names, &child_path, errors);
+                        }
+                    }
+                } else {
+                    check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors);
+                }
             }
         }
         _ => {}
@@ -1471,15 +1519,15 @@ fn check_response_exclusivity(
                         ));
                     }
                 }
-                // Plural "responses" form
+                // Plural "responses" form — path uses singular "response" per spec
                 if let Some(responses) = tool.get("responses").and_then(|v| v.as_array()) {
-                    for (ri, resp) in responses.iter().enumerate() {
+                    for resp in responses {
                         let has_content = resp.get("content").is_some();
                         let has_synthesize = resp.get("synthesize").is_some();
                         if has_content && has_synthesize {
                             errors.push(verr(
                                 "V-033",
-                                format!("{}.tools[{}].responses[{}]", path, ti, ri),
+                                format!("{}.tools[{}].response", path, ti),
                                 "content and synthesize are mutually exclusive",
                             ));
                         }
@@ -1686,7 +1734,19 @@ fn v036_mode_protocol_pattern(
     errors: &mut Vec<ValidationError>,
     warnings: &mut Vec<Diagnostic>,
 ) {
-    // execution.mode pattern is validated by V-005; V-036 handles actor/phase modes.
+    // Check execution.mode pattern (V-036)
+    if let Some(mode) = &doc.attack.execution.mode
+        && !MODE_RE.is_match(mode)
+    {
+        errors.push(verr(
+            "V-036",
+            "attack.execution.mode",
+            format!(
+                "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
+                mode
+            ),
+        ));
+    }
     // Check for W-002 warning on execution.mode (unrecognized but valid pattern)
     if let Some(mode) = &doc.attack.execution.mode
         && MODE_RE.is_match(mode)
@@ -2005,6 +2065,29 @@ fn v045_on_enter_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
                     format!("{}.phases[{}].on_enter", actor_info.path_prefix, pi),
                     "on_enter, when present, must contain at least one action",
                 ));
+            }
+        }
+    }
+}
+
+// ─── V-046 ──────────────────────────────────────────────────────────────────
+
+fn v046_phase_mode_matches_actor(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(actors) = &doc.attack.execution.actors {
+        for (ai, actor) in actors.iter().enumerate() {
+            for (pi, phase) in actor.phases.iter().enumerate() {
+                if let Some(pm) = &phase.mode
+                    && *pm != actor.mode
+                {
+                    errors.push(verr(
+                        "V-046",
+                        format!("attack.execution.actors[{}].phases[{}].mode", ai, pi),
+                        format!(
+                            "phase mode '{}' must match actor mode '{}'",
+                            pm, actor.mode
+                        ),
+                    ));
+                }
             }
         }
     }
