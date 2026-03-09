@@ -132,17 +132,17 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
     SurfaceEntry {
         surface: "sampling_request",
         protocol: "mcp",
-        default_target: "params",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "elicitation_request",
         protocol: "mcp",
-        default_target: "params",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "elicitation_response",
         protocol: "mcp",
-        default_target: "result",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "mcp_task_status",
@@ -152,7 +152,7 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
     SurfaceEntry {
         surface: "mcp_task_result",
         protocol: "mcp",
-        default_target: "result",
+        default_target: "",
     },
     SurfaceEntry {
         surface: "roots_response",

@@ -233,17 +233,30 @@ fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
         if let Some(entries) = state.get("elicitation_responses").and_then(|v| v.as_array()) {
             static VALID_ELICITATION_ACTIONS: &[&str] = &["accept", "decline", "cancel"];
             for (ei, entry) in entries.iter().enumerate() {
-                if let Some(action) = entry.get("action").and_then(|v| v.as_str())
-                    && !VALID_ELICITATION_ACTIONS.contains(&action)
-                {
-                    errors.push(verr(
-                        "V-005",
-                        format!("{}.elicitation_responses[{}].action", path_prefix, ei),
-                        format!(
-                            "invalid elicitation_responses action: '{}', must be one of: accept, decline, cancel",
-                            action
-                        ),
-                    ));
+                if let Some(action_val) = entry.get("action") {
+                    match action_val.as_str() {
+                        Some(action) if VALID_ELICITATION_ACTIONS.contains(&action) => {}
+                        Some(action) => {
+                            errors.push(verr(
+                                "V-005",
+                                format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                                format!(
+                                    "invalid elicitation_responses action: '{}', must be one of: accept, decline, cancel",
+                                    action
+                                ),
+                            ));
+                        }
+                        None => {
+                            errors.push(verr(
+                                "V-005",
+                                format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                                format!(
+                                    "elicitation_responses action must be a string, got {}",
+                                    action_val
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
         }

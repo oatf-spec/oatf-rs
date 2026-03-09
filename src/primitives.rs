@@ -611,8 +611,26 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        // Objects and arrays serialize to compact JSON
-        _ => serde_json::to_string(v).unwrap_or_default(),
+        // Objects and arrays serialize to compact JSON with keys sorted
+        // lexicographically per spec §5.3.
+        _ => serde_json::to_string(&sort_keys(v)).unwrap_or_default(),
+    }
+}
+
+/// Recursively sort object keys lexicographically for canonical JSON output.
+fn sort_keys(v: &Value) -> Value {
+    match v {
+        Value::Object(map) => {
+            let mut sorted: serde_json::Map<String, Value> = serde_json::Map::new();
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            for k in keys {
+                sorted.insert(k.clone(), sort_keys(&map[k]));
+            }
+            Value::Object(sorted)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(sort_keys).collect()),
+        _ => v.clone(),
     }
 }
 
