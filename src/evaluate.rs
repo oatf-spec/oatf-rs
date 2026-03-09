@@ -188,6 +188,36 @@ fn cel_to_json(value: &cel::Value) -> Value {
     }
 }
 
+fn make_verdict(
+    id: String,
+    result: IndicatorResult,
+    evidence: Option<String>,
+) -> IndicatorVerdict {
+    IndicatorVerdict {
+        indicator_id: id,
+        result,
+        timestamp: None,
+        evidence,
+        source: None,
+    }
+}
+
+fn build_attack_verdict(
+    attack_id: Option<String>,
+    result: AttackResult,
+    indicator_verdicts: Vec<IndicatorVerdict>,
+    evaluation_summary: EvaluationSummary,
+) -> AttackVerdict {
+    AttackVerdict {
+        attack_id,
+        result,
+        indicator_verdicts,
+        evaluation_summary,
+        timestamp: None,
+        source: None,
+    }
+}
+
 // ─── §4.2 evaluate_pattern ──────────────────────────────────────────────────
 
 /// Evaluates a pattern indicator against a protocol message.
@@ -271,85 +301,39 @@ pub fn evaluate_indicator(
     let indicator_id = indicator.id.clone().unwrap_or_default();
 
     if let Some(ref pattern) = indicator.pattern {
-        // Pattern dispatch
         match evaluate_pattern(pattern, message) {
-            Ok(true) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::Matched,
-                timestamp: None,
-                evidence: None,
-                source: None,
-            },
-            Ok(false) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::NotMatched,
-                timestamp: None,
-                evidence: None,
-                source: None,
-            },
-            Err(e) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::Error,
-                timestamp: None,
-                evidence: Some(e.message),
-                source: None,
-            },
+            Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
+            Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
+            Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
         }
     } else if let Some(ref expr) = indicator.expression {
-        // Expression dispatch
         match cel_evaluator {
-            None => IndicatorVerdict {
+            None => make_verdict(
                 indicator_id,
-                result: IndicatorResult::Skipped,
-                timestamp: None,
-                evidence: Some("CEL evaluator not available".to_string()),
-                source: None,
-            },
+                IndicatorResult::Skipped,
+                Some("CEL evaluator not available".to_string()),
+            ),
             Some(cel_eval) => match evaluate_expression(expr, message, cel_eval) {
-                Ok(true) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::Matched,
-                    timestamp: None,
-                    evidence: None,
-                    source: None,
-                },
-                Ok(false) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::NotMatched,
-                    timestamp: None,
-                    evidence: None,
-                    source: None,
-                },
-                Err(e) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::Error,
-                    timestamp: None,
-                    evidence: Some(e.message),
-                    source: None,
-                },
+                Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
+                Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
+                Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
             },
         }
     } else if let Some(ref semantic) = indicator.semantic {
-        // Semantic dispatch
         match semantic_evaluator {
-            None => IndicatorVerdict {
+            None => make_verdict(
                 indicator_id,
-                result: IndicatorResult::Skipped,
-                timestamp: None,
-                evidence: Some("Semantic evaluator not available".to_string()),
-                source: None,
-            },
+                IndicatorResult::Skipped,
+                Some("Semantic evaluator not available".to_string()),
+            ),
             Some(sem_eval) => evaluate_semantic(semantic, message, sem_eval, &indicator_id),
         }
     } else {
-        // No detection key present
-        IndicatorVerdict {
+        make_verdict(
             indicator_id,
-            result: IndicatorResult::Error,
-            timestamp: None,
-            evidence: Some("No detection key (pattern/expression/semantic) present".to_string()),
-            source: None,
-        }
+            IndicatorResult::Error,
+            Some("No detection key (pattern/expression/semantic) present".to_string()),
+        )
     }
 }
 
@@ -364,13 +348,7 @@ fn evaluate_semantic(
     let resolved = resolve_wildcard_path(target, message);
 
     if resolved.is_empty() {
-        return IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::NotMatched,
-            timestamp: None,
-            evidence: None,
-            source: None,
-        };
+        return make_verdict(indicator_id.to_string(), IndicatorResult::NotMatched, None);
     }
 
     let threshold = semantic.threshold.unwrap_or(0.7);
@@ -391,34 +369,25 @@ fn evaluate_semantic(
                 }
             }
             Err(e) => {
-                return IndicatorVerdict {
-                    indicator_id: indicator_id.to_string(),
-                    result: IndicatorResult::Error,
-                    timestamp: None,
-                    evidence: Some(e.message),
-                    source: None,
-                };
+                return make_verdict(
+                    indicator_id.to_string(),
+                    IndicatorResult::Error,
+                    Some(e.message),
+                );
             }
         }
     }
 
-    if highest_score >= threshold {
-        IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::Matched,
-            timestamp: None,
-            evidence: Some(format!("{:.2}", highest_score)),
-            source: None,
-        }
+    let result = if highest_score >= threshold {
+        IndicatorResult::Matched
     } else {
-        IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::NotMatched,
-            timestamp: None,
-            evidence: Some(format!("{:.2}", highest_score)),
-            source: None,
-        }
-    }
+        IndicatorResult::NotMatched
+    };
+    make_verdict(
+        indicator_id.to_string(),
+        result,
+        Some(format!("{:.2}", highest_score)),
+    )
 }
 
 /// Serialize a value to text for semantic evaluation.
@@ -448,19 +417,17 @@ pub fn compute_verdict(
     let indicators = match &attack.indicators {
         Some(inds) => inds,
         None => {
-            return AttackVerdict {
-                attack_id: attack.id.clone(),
-                result: AttackResult::Error,
-                indicator_verdicts: vec![],
-                evaluation_summary: EvaluationSummary {
+            return build_attack_verdict(
+                attack.id.clone(),
+                AttackResult::Error,
+                vec![],
+                EvaluationSummary {
                     matched: 0,
                     not_matched: 0,
                     error: 0,
                     skipped: 0,
                 },
-                timestamp: None,
-                source: None,
-            };
+            );
         }
     };
 
@@ -491,34 +458,29 @@ pub fn compute_verdict(
                 collected_verdicts.push(v.clone());
             }
             None => {
-                // Missing entry → treated as skipped
                 skipped += 1;
-                collected_verdicts.push(IndicatorVerdict {
-                    indicator_id: ind_id.to_string(),
-                    result: IndicatorResult::Skipped,
-                    timestamp: None,
-                    evidence: Some("No evaluation result provided".to_string()),
-                    source: None,
-                });
+                collected_verdicts.push(make_verdict(
+                    ind_id.to_string(),
+                    IndicatorResult::Skipped,
+                    Some("No evaluation result provided".to_string()),
+                ));
             }
         }
     }
 
     // All-skipped → error: no evaluation occurred (§4.5)
     if skipped > 0 && matched == 0 && not_matched == 0 && error == 0 {
-        return AttackVerdict {
-            attack_id: attack.id.clone(),
-            result: AttackResult::Error,
-            indicator_verdicts: collected_verdicts,
-            evaluation_summary: EvaluationSummary {
+        return build_attack_verdict(
+            attack.id.clone(),
+            AttackResult::Error,
+            collected_verdicts,
+            EvaluationSummary {
                 matched,
                 not_matched,
                 error,
                 skipped,
             },
-            timestamp: None,
-            source: None,
-        };
+        );
     }
 
     let result = match logic {
@@ -544,17 +506,15 @@ pub fn compute_verdict(
         }
     };
 
-    AttackVerdict {
-        attack_id: attack.id.clone(),
+    build_attack_verdict(
+        attack.id.clone(),
         result,
-        indicator_verdicts: collected_verdicts,
-        evaluation_summary: EvaluationSummary {
+        collected_verdicts,
+        EvaluationSummary {
             matched,
             not_matched,
             error,
             skipped,
         },
-        timestamp: None,
-        source: None,
-    }
+    )
 }

@@ -290,47 +290,50 @@ fn line_introduces_block_scalar(trimmed: &str) -> bool {
     matches!(v, "|" | ">" | "|-" | "|+" | ">-" | ">+")
 }
 
+fn skip_double_quoted(bytes: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn skip_single_quoted(bytes: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'\'' {
+                i += 1;
+            } else {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    i
+}
+
 /// Find the position of the key-value colon in a YAML line, skipping quoted strings.
 fn find_colon_in_yaml(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'\'' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' {
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
+            b'"' => i = skip_double_quoted(bytes, i),
+            b'\'' => i = skip_single_quoted(bytes, i),
             b':' if i + 1 >= bytes.len() || bytes[i + 1] == b' ' || bytes[i + 1] == b'\t' => {
                 return Some(i);
             }
-            _ => {
-                i += 1;
-            }
+            _ => i += 1,
         }
     }
     None
@@ -342,44 +345,15 @@ fn strip_trailing_comment(value: &str) -> &str {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'\'' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' {
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
+            b'"' => i = skip_double_quoted(bytes, i),
+            b'\'' => i = skip_single_quoted(bytes, i),
             b' ' if i + 1 < bytes.len() && bytes[i + 1] == b'#' => {
                 return &value[..i];
             }
             b'#' if i == 0 => {
                 return "";
             }
-            _ => {
-                i += 1;
-            }
+            _ => i += 1,
         }
     }
     value

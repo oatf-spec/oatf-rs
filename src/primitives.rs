@@ -197,8 +197,7 @@ pub fn is_valid_simple_dot_path(path: &str) -> bool {
     if path.is_empty() {
         return true;
     }
-    let segments: Vec<&str> = path.split('.').collect();
-    for seg in &segments {
+    for seg in path.split('.') {
         if seg.is_empty() {
             return false;
         }
@@ -792,23 +791,23 @@ fn evaluate_extractor_jsonpath(selector: &str, message: &Value) -> Option<String
     let path = serde_json_path::JsonPath::parse(selector).ok()?;
     let node_list = path.query(message);
     let first = node_list.first()?;
+    Some(extractor_value_to_string(first))
+}
 
-    // Serialize: scalars to their natural representation, non-scalars to compact JSON
-    match first {
-        Value::String(s) => Some(s.clone()),
-        Value::Null => Some("null".to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        _ => Some(serde_json::to_string(first).unwrap_or_default()),
+/// Like `value_to_string` but without key sorting — preserves insertion order
+/// for extractors where the spec doesn't mandate canonical key ordering.
+fn extractor_value_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => serde_json::to_string(v).unwrap_or_default(),
     }
 }
 
 fn evaluate_extractor_regex(selector: &str, message: &Value) -> Option<String> {
-    let text = match message {
-        Value::String(s) => s.clone(),
-        _ => serde_json::to_string(message).unwrap_or_default(),
-    };
-
+    let text = extractor_value_to_string(message);
     let re = Regex::new(selector).ok()?;
     let caps = re.captures(&text)?;
 
@@ -924,8 +923,8 @@ pub fn evaluate_trigger(
 ///
 /// Returns `(base_event, optional_qualifier)`.
 pub fn parse_event_qualifier(event_string: &str) -> (&str, Option<&str>) {
-    match event_string.find(':') {
-        Some(pos) => (&event_string[..pos], Some(&event_string[pos + 1..])),
+    match event_string.split_once(':') {
+        Some((base, qualifier)) => (base, Some(qualifier)),
         None => (event_string, None),
     }
 }

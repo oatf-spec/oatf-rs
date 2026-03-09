@@ -264,8 +264,6 @@ pub enum Action {
         params: Option<Value>,
         /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
     },
     /// Emit a log message.
     Log {
@@ -275,8 +273,6 @@ pub enum Action {
         level: Option<LogLevel>,
         /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
     },
     /// Send a user elicitation request.
     SendElicitation {
@@ -293,8 +289,6 @@ pub enum Action {
         elicitation_id: Option<String>,
         /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
     },
     /// Binding-specific action with a single unknown key.
     BindingSpecific {
@@ -304,8 +298,6 @@ pub enum Action {
         value: Value,
         /// Extension fields (`x-*` prefixed).
         extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
     },
 }
 
@@ -423,6 +415,13 @@ impl<'de> Deserialize<'de> for Action {
             }
         }
 
+        if non_ext_key_count != 1 {
+            return Err(serde::de::Error::custom(format!(
+                "action must have exactly 1 non-extension key, found {}",
+                non_ext_key_count
+            )));
+        }
+
         let key = action_key
             .ok_or_else(|| serde::de::Error::custom("action object must have at least one key"))?;
         let value = action_value.unwrap();
@@ -450,7 +449,6 @@ impl<'de> Deserialize<'de> for Action {
                     method,
                     params,
                     extensions,
-                    non_ext_key_count,
                 })
             }
             "log" => {
@@ -479,7 +477,6 @@ impl<'de> Deserialize<'de> for Action {
                     message,
                     level,
                     extensions,
-                    non_ext_key_count,
                 })
             }
             "send_elicitation" => {
@@ -525,14 +522,12 @@ impl<'de> Deserialize<'de> for Action {
                     url,
                     elicitation_id,
                     extensions,
-                    non_ext_key_count,
                 })
             }
             _ => Ok(Action::BindingSpecific {
                 key,
                 value,
                 extensions,
-                non_ext_key_count,
             }),
         }
     }
@@ -887,7 +882,7 @@ impl<'de> Deserialize<'de> for PatternMatch {
         };
 
         let condition = match map.get("condition") {
-            Some(v) => Some(parse_condition_strict(v.clone()).map_err(serde::de::Error::custom)?),
+            Some(v) => Some(Condition::from_value(v.clone()).map_err(serde::de::Error::custom)?),
             None => None,
         };
 
@@ -927,21 +922,6 @@ impl<'de> Deserialize<'de> for PatternMatch {
     }
 }
 
-fn parse_condition_strict(v: Value) -> Result<Condition, String> {
-    match &v {
-        Value::Object(map) => {
-            if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
-                let cond: MatchCondition = serde_json::from_value(v)
-                    .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
-                Ok(Condition::Operators(cond))
-            } else {
-                Ok(Condition::Equality(v))
-            }
-        }
-        _ => Ok(Condition::Equality(v)),
-    }
-}
-
 /// A Condition is either a bare Value (equality) or a MatchCondition object.
 #[derive(Clone, Debug)]
 pub enum Condition {
@@ -952,17 +932,18 @@ pub enum Condition {
 }
 
 impl Condition {
-    pub fn from_value(v: Value) -> Self {
+    pub fn from_value(v: Value) -> Result<Self, String> {
         match &v {
             Value::Object(map) => {
-                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
-                    && let Ok(cond) = serde_json::from_value::<MatchCondition>(v.clone())
-                {
-                    return Condition::Operators(cond);
+                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
+                    let cond: MatchCondition = serde_json::from_value(v)
+                        .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
+                    Ok(Condition::Operators(cond))
+                } else {
+                    Ok(Condition::Equality(v))
                 }
-                Condition::Equality(v)
             }
-            _ => Condition::Equality(v),
+            _ => Ok(Condition::Equality(v)),
         }
     }
 }

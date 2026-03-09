@@ -288,7 +288,7 @@ fn evaluate_condition_suite() {
 /// Parse a condition from a raw JSON value (same logic as Condition::from_value
 /// but for test input which can be a bare scalar or an operator object).
 fn parse_condition(value: &Value) -> Condition {
-    Condition::from_value(value.clone())
+    Condition::from_value(value.clone()).expect("invalid condition in test data")
 }
 
 // --- evaluate_predicate ------------------------------------------------------

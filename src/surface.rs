@@ -82,7 +82,7 @@ pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
     SurfaceEntry {
         surface: "server_notification",
         protocol: "mcp",
-        default_target: "",
+        default_target: "params",
     },
     SurfaceEntry {
         surface: "server_capability",

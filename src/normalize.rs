@@ -134,25 +134,12 @@ fn n001_defaults(doc: &mut Document) {
 // ─── N-002: Severity scalar expansion ────────────────────────────────────────
 
 fn n002_severity_expansion(doc: &mut Document) {
-    if let Some(ref severity) = doc.attack.severity {
-        match severity {
-            Severity::Scalar(level) => {
-                doc.attack.severity = Some(Severity::Object {
-                    level: level.clone(),
-                    confidence: Some(50),
-                });
-            }
-            Severity::Object {
-                confidence: None,
-                level,
-            } => {
-                doc.attack.severity = Some(Severity::Object {
-                    level: level.clone(),
-                    confidence: Some(50),
-                });
-            }
-            _ => {}
-        }
+    if let Some(Severity::Scalar(level)) = &doc.attack.severity {
+        let level = level.clone();
+        doc.attack.severity = Some(Severity::Object {
+            level,
+            confidence: Some(50),
+        });
     }
 }
 

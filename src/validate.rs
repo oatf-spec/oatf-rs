@@ -148,7 +148,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v040_extractors_non_empty(doc, &mut errors);
     v041_expression_variable_keys(doc, &mut errors);
     v042_trigger_event_or_after(doc, &mut errors);
-    v043_binding_specific_action_keys(doc, &mut errors);
+    // V-043 is enforced at parse time (Action::deserialize rejects != 1 non-extension key).
     v044_regex_extractor_capture_group(doc, &mut errors);
     v045_on_enter_non_empty(doc, &mut errors);
     v046_phase_mode_matches_actor(doc, &mut errors);
@@ -200,15 +200,12 @@ fn collect_actors(doc: &Document) -> Vec<ActorInfo<'_>> {
     }
 }
 
-fn resolve_mode(
-    doc: &Document,
-    actor_mode: Option<&str>,
-    phase_mode: Option<&str>,
-) -> Option<String> {
-    phase_mode
-        .or(actor_mode)
-        .or(doc.attack.execution.mode.as_deref())
-        .map(|s| s.to_string())
+fn collect_actor_names(doc: &Document) -> std::collections::HashSet<String> {
+    if let Some(actors) = &doc.attack.execution.actors {
+        actors.iter().map(|a| a.name.clone()).collect()
+    } else {
+        std::iter::once("default".to_string()).collect()
+    }
 }
 
 // ─── V-001 ──────────────────────────────────────────────────────────────────
@@ -538,24 +535,32 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-fn for_each_state_response_entry<F>(doc: &Document, mut visit: F)
+fn for_each_state<F>(doc: &Document, mut visit: F)
 where
     F: FnMut(&serde_json::Value, &str),
 {
     if let Some(state) = &doc.attack.execution.state {
-        for_each_response_entry_in_state(state, "attack.execution.state", &mut visit);
+        visit(state, "attack.execution.state");
     }
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(state) = &phase.state {
-                for_each_response_entry_in_state(
+                visit(
                     state,
                     &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    &mut visit,
                 );
             }
         }
     }
+}
+
+fn for_each_state_response_entry<F>(doc: &Document, mut visit: F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
+    for_each_state(doc, |state, path| {
+        for_each_response_entry_in_state(state, path, &mut visit);
+    });
 }
 
 fn for_each_response_entry_in_state<F>(state: &serde_json::Value, path: &str, visit: &mut F)
@@ -680,20 +685,12 @@ fn is_valid_jsonpath_syntax(path: &str) -> bool {
 
 fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     // Check for unclosed {{ in template strings throughout the document
-    // Handle single-phase form directly (collect_actors returns empty for it)
-    if let Some(state) = &doc.attack.execution.state {
-        check_templates_in_value(state, "attack.execution.state", errors);
-    }
-    // We check state values and on_enter action message fields
+    for_each_state(doc, |state, path| {
+        check_templates_in_value(state, path, errors);
+    });
+    // Also check on_enter action message fields
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                check_templates_in_value(
-                    state,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
-            }
             if let Some(actions) = &phase.on_enter {
                 for (ai, action) in actions.iter().enumerate() {
                     let action_value = serde_json::to_value(action).unwrap_or_default();
@@ -793,16 +790,14 @@ fn v018_surface_protocol(
 ) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            let entry = lookup_surface(&ind.surface);
-            if entry.is_none() {
+            let Some(entry) = lookup_surface(&ind.surface) else {
                 errors.push(verr(
                     "V-018",
                     format!("attack.indicators[{}].surface", i),
                     format!("unknown surface: '{}'", ind.surface),
                 ));
                 continue;
-            }
-            let entry = entry.unwrap();
+            };
             let inferred = infer_execution_protocol(&doc.attack.execution);
             let protocol = ind
                 .protocol
@@ -1254,33 +1249,10 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
 // ─── V-032 ──────────────────────────────────────────────────────────────────
 
 fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let actor_names: std::collections::HashSet<String> =
-        if let Some(actors) = &doc.attack.execution.actors {
-            actors.iter().map(|a| a.name.clone()).collect()
-        } else {
-            // After normalization, single-phase/multi-phase have actor "default"
-            let mut set = std::collections::HashSet::new();
-            set.insert("default".to_string());
-            set
-        };
-
-    // Scan all template strings in the document for {{actor_name.extractor_name}} references.
-    // Handle single-phase form directly.
-    if let Some(state) = &doc.attack.execution.state {
-        check_cross_actor_refs_in_value(state, &actor_names, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                check_cross_actor_refs_in_value(
-                    state,
-                    &actor_names,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
-            }
-        }
-    }
+    let actor_names = collect_actor_names(doc);
+    for_each_state(doc, |state, path| {
+        check_cross_actor_refs_in_value(state, &actor_names, path, errors);
+    });
 }
 
 fn check_cross_actor_refs_in_value(
@@ -1351,26 +1323,13 @@ fn check_cross_actor_refs_in_string(
 // ─── V-033 ──────────────────────────────────────────────────────────────────
 
 fn v033_content_synthesize_exclusivity(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Check state values for response entries with both content/messages and synthesize
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        let mode = doc.attack.execution.mode.as_deref().unwrap_or_default();
-        check_response_exclusivity(state, mode, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let mode = resolve_mode(doc, actor_info.mode, phase.mode.as_deref());
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_response_exclusivity(state, &mode.unwrap_or_default(), &path, errors);
-            }
-        }
-    }
+    for_each_state(doc, |state, path| {
+        check_response_exclusivity(state, path, errors);
+    });
 }
 
 fn check_response_exclusivity(
     state: &serde_json::Value,
-    _mode: &str,
     path: &str,
     errors: &mut Vec<ValidationError>,
 ) {
@@ -1460,18 +1419,9 @@ fn check_response_exclusivity(
 // ─── V-034 ──────────────────────────────────────────────────────────────────
 
 fn v034_catch_all_constraints(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        check_catch_all_in_state(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_catch_all_in_state(state, &path, errors);
-            }
-        }
-    }
+    for_each_state(doc, |state, path| {
+        check_catch_all_in_state(state, path, errors);
+    });
 }
 
 fn check_catch_all_in_state(
@@ -1541,18 +1491,9 @@ fn check_catch_all_list(
 // ─── V-035 ──────────────────────────────────────────────────────────────────
 
 fn v035_synthesize_prompt(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        check_synthesize_prompts(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_synthesize_prompts(state, &path, errors);
-            }
-        }
-    }
+    for_each_state(doc, |state, path| {
+        check_synthesize_prompts(state, path, errors);
+    });
 }
 
 fn check_synthesize_prompts(
@@ -1833,40 +1774,7 @@ fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>
 
 // ─── V-043 ──────────────────────────────────────────────────────────────────
 
-fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(actions) = &phase.on_enter {
-                for (ai, action) in actions.iter().enumerate() {
-                    let count = match action {
-                        Action::SendNotification {
-                            non_ext_key_count, ..
-                        }
-                        | Action::Log {
-                            non_ext_key_count, ..
-                        }
-                        | Action::SendElicitation {
-                            non_ext_key_count, ..
-                        }
-                        | Action::BindingSpecific {
-                            non_ext_key_count, ..
-                        } => *non_ext_key_count,
-                    };
-                    if count != 1 {
-                        errors.push(verr(
-                            "V-043",
-                            format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
-                            format!(
-                                "action must have exactly one non-extension key, found {}",
-                                count
-                            ),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-}
+// V-043 is now enforced at parse time in Action::deserialize.
 
 // ─── V-044 ──────────────────────────────────────────────────────────────────
 
@@ -1958,15 +1866,7 @@ fn w001_oatf_key_ordering(doc: &Document, warnings: &mut Vec<Diagnostic>) {
 // ─── W-004 ──────────────────────────────────────────────────────────────────
 
 fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>) {
-    // Collect actor names so cross-actor references ({{actor.extractor}}) are not flagged
-    let actor_names: std::collections::HashSet<String> =
-        if let Some(actors) = &doc.attack.execution.actors {
-            actors.iter().map(|a| a.name.clone()).collect()
-        } else {
-            let mut set = std::collections::HashSet::new();
-            set.insert("default".to_string());
-            set
-        };
+    let actor_names = collect_actor_names(doc);
 
     // Single-phase form has no phase-local extractor declarations.
     if let Some(state) = &doc.attack.execution.state {
