@@ -94,11 +94,6 @@ static CROSS_ACTOR_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
 static CEL_ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
-static SHORTHAND_DURATION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[0-9]+[smhd]$").unwrap());
-
-static ISO_DURATION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$").unwrap());
 
 static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
@@ -1857,17 +1852,17 @@ fn v037_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-038 ──────────────────────────────────────────────────────────────────
 
 fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Validate trigger.after durations
+    // Validate trigger.after durations by actually parsing them
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(trigger) = &phase.trigger
                 && let Some(after) = &trigger.after
-                && !is_valid_duration(after)
+                && let Err(e) = crate::primitives::parse_duration(after)
             {
                 errors.push(verr(
                     "V-038",
                     format!("{}.phases[{}].trigger.after", actor_info.path_prefix, pi),
-                    format!("invalid duration: '{}'", after),
+                    format!("invalid duration '{}': {}", after, e),
                 ));
             }
         }
@@ -1875,36 +1870,14 @@ fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>
 
     // Validate attack.grace_period duration
     if let Some(gp) = &doc.attack.grace_period
-        && !is_valid_duration(gp)
+        && let Err(e) = crate::primitives::parse_duration(gp)
     {
         errors.push(verr(
             "V-038",
             "attack.grace_period",
-            format!("invalid duration: '{}'", gp),
+            format!("invalid duration '{}': {}", gp, e),
         ));
     }
-}
-
-/// Validate a duration string (shorthand or ISO 8601).
-pub fn is_valid_duration(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    if SHORTHAND_DURATION_RE.is_match(s) {
-        return true;
-    }
-    if ISO_DURATION_RE.is_match(s) {
-        // Must have at least one component
-        let has_day = s.contains('D');
-        let has_t = s.contains('T');
-        let has_time_component = s.contains('H') || s.contains('M') || s.contains('S');
-        // If T is present, it must have at least one time component (reject "P1DT", "PT")
-        if has_t && !has_time_component {
-            return false;
-        }
-        return has_day || has_time_component;
-    }
-    false
 }
 
 // ─── V-039 ──────────────────────────────────────────────────────────────────
