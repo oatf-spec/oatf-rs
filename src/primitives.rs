@@ -10,6 +10,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Compile a user-supplied regex with size limits to prevent ReDoS.
+pub(crate) fn compile_user_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(1 << 20) // 1 MB compiled size
+        .dfa_size_limit(1 << 20) // 1 MB DFA size
+        .build()
+}
+
 // Re-export extract_protocol from event_registry (§5.10)
 pub use crate::event_registry::extract_protocol;
 // Re-export resolve_event_qualifier from event_registry (§7)
@@ -386,37 +394,33 @@ pub fn evaluate_match_condition(cond: &MatchCondition, value: &Value) -> bool {
         || cond.starts_with.is_some()
         || cond.ends_with.is_some()
         || cond.regex.is_some();
-    let text = if need_string_op {
-        Some(value_to_string(value))
-    } else {
-        None
-    };
 
-    if let Some(ref s) = cond.contains
-        && !text.as_ref().unwrap().contains(s.as_str())
-    {
-        return false;
-    }
+    if need_string_op {
+        let text = value_to_string(value);
 
-    if let Some(ref s) = cond.starts_with
-        && !text.as_ref().unwrap().starts_with(s.as_str())
-    {
-        return false;
-    }
-
-    if let Some(ref s) = cond.ends_with
-        && !text.as_ref().unwrap().ends_with(s.as_str())
-    {
-        return false;
-    }
-
-    if let Some(ref pattern) = cond.regex {
-        if let Ok(re) = Regex::new(pattern) {
-            if !re.is_match(text.as_ref().unwrap()) {
-                return false;
+        if let Some(ref s) = cond.contains
+            && !text.contains(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref s) = cond.starts_with
+            && !text.starts_with(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref s) = cond.ends_with
+            && !text.ends_with(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref pattern) = cond.regex {
+            if let Ok(re) = compile_user_regex(pattern) {
+                if !re.is_match(&text) {
+                    return false;
+                }
+            } else {
+                return false; // invalid regex → false
             }
-        } else {
-            return false; // invalid regex → false
         }
     }
 
@@ -537,11 +541,9 @@ pub fn evaluate_predicate(predicate: &MatchPredicate, value: &Value) -> bool {
                         exists: Some(true), ..
                     } => {
                         // exists: true — path MUST resolve
-                        if resolved.is_none() {
+                        let Some(val) = &resolved else {
                             return false;
-                        }
-                        // Evaluate remaining operators
-                        let val = resolved.as_ref().unwrap();
+                        };
                         if !evaluate_match_condition_excluding_exists(cond, val) {
                             return false;
                         }
@@ -670,23 +672,32 @@ fn value_to_string(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         // Objects and arrays serialize to compact JSON with keys sorted
         // lexicographically per spec §5.3.
-        _ => serde_json::to_string(&sort_keys(v)).unwrap_or_default(),
+        _ => serde_json::to_string(&sort_keys(v)).unwrap_or_else(|_| "<unserializable>".to_string()),
     }
 }
 
+const MAX_VALUE_DEPTH: usize = 128;
+
 /// Recursively sort object keys lexicographically for canonical JSON output.
 fn sort_keys(v: &Value) -> Value {
+    sort_keys_inner(v, 0)
+}
+
+fn sort_keys_inner(v: &Value, depth: usize) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return v.clone();
+    }
     match v {
         Value::Object(map) => {
             let mut sorted: serde_json::Map<String, Value> = serde_json::Map::new();
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
             for k in keys {
-                sorted.insert(k.clone(), sort_keys(&map[k]));
+                sorted.insert(k.clone(), sort_keys_inner(&map[k], depth + 1));
             }
             Value::Object(sorted)
         }
-        Value::Array(arr) => Value::Array(arr.iter().map(sort_keys).collect()),
+        Value::Array(arr) => Value::Array(arr.iter().map(|v| sort_keys_inner(v, depth + 1)).collect()),
         _ => v.clone(),
     }
 }
@@ -713,7 +724,7 @@ pub fn interpolate_value(
     response: Option<&Value>,
 ) -> (Value, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
-    let result = interpolate_value_inner(value, extractors, request, response, &mut diagnostics);
+    let result = interpolate_value_inner(value, extractors, request, response, &mut diagnostics, 0);
     (result, diagnostics)
 }
 
@@ -723,7 +734,11 @@ fn interpolate_value_inner(
     request: Option<&Value>,
     response: Option<&Value>,
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return value.clone();
+    }
     match value {
         Value::String(s) => {
             if s.contains("{{") {
@@ -739,7 +754,7 @@ fn interpolate_value_inner(
                 .iter()
                 .map(|(k, v)| {
                     let new_v =
-                        interpolate_value_inner(v, extractors, request, response, diagnostics);
+                        interpolate_value_inner(v, extractors, request, response, diagnostics, depth + 1);
                     (k.clone(), new_v)
                 })
                 .collect();
@@ -748,7 +763,7 @@ fn interpolate_value_inner(
         Value::Array(arr) => {
             let new_arr: Vec<Value> = arr
                 .iter()
-                .map(|v| interpolate_value_inner(v, extractors, request, response, diagnostics))
+                .map(|v| interpolate_value_inner(v, extractors, request, response, diagnostics, depth + 1))
                 .collect();
             Value::Array(new_arr)
         }
@@ -802,13 +817,13 @@ fn extractor_value_to_string(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        _ => serde_json::to_string(v).unwrap_or_default(),
+        _ => serde_json::to_string(v).unwrap_or_else(|_| "<unserializable>".to_string()),
     }
 }
 
 fn evaluate_extractor_regex(selector: &str, message: &Value) -> Option<String> {
     let text = extractor_value_to_string(message);
-    let re = Regex::new(selector).ok()?;
+    let re = compile_user_regex(selector).ok()?;
     let caps = re.captures(&text)?;
 
     // Must have at least one capture group; return first group

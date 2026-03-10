@@ -1,4 +1,4 @@
-//! Document validation against conformance rules V-001 through V-046.
+//! Document validation against conformance rules V-001 through V-050.
 //!
 //! Returns **all** errors and warnings, not just the first. Validation does not
 //! modify the document.
@@ -7,12 +7,14 @@ use crate::error::*;
 use crate::event_registry::{
     extract_protocol, infer_execution_protocol, is_event_valid_for_mode, strip_event_qualifier,
 };
-use crate::primitives::{is_valid_simple_dot_path, is_valid_wildcard_dot_path};
+use crate::primitives::{compile_user_regex, is_valid_simple_dot_path, is_valid_wildcard_dot_path};
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
+
+const MAX_VALUE_DEPTH: usize = 128;
 
 // ─── Helper: construct ValidationError with auto-populated spec_ref ─────────
 
@@ -73,6 +75,10 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-044" => "§5.5",
         "V-045" => "§5.2",
         "V-046" => "§4.2",
+        "V-047" => "§7.2",
+        "V-048" => "§4.4",
+        "V-049" => "§4.2",
+        "V-050" => "§4.5",
         _ => "",
     }
 }
@@ -152,6 +158,10 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v044_regex_extractor_capture_group(doc, &mut errors);
     v045_on_enter_non_empty(doc, &mut errors);
     v046_phase_mode_matches_actor(doc, &mut errors);
+    v047_a2a_client_mutual_exclusivity(doc, &mut errors);
+    v048_impact_no_duplicates(doc, &mut errors);
+    v049_grace_period_duration(doc, &mut errors);
+    v050_correlation_requires_indicators(doc, &mut errors);
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
@@ -482,7 +492,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
             if let Some(pattern) = &ind.pattern {
                 // Check regex in shorthand form
                 if let Some(re) = &pattern.regex
-                    && let Err(e) = Regex::new(re)
+                    && let Err(e) = compile_user_regex(re)
                 {
                     errors.push(verr(
                         "V-013",
@@ -493,7 +503,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
                 // Check regex in condition form
                 if let Some(Condition::Operators(cond)) = &pattern.condition
                     && let Some(re) = &cond.regex
-                    && let Err(e) = Regex::new(re)
+                    && let Err(e) = compile_user_regex(re)
                 {
                     errors.push(verr(
                         "V-013",
@@ -518,7 +528,7 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
                 for (key, entry) in pred {
                     if let MatchEntry::Condition(cond) = entry
                         && let Some(re) = &cond.regex
-                        && let Err(e) = Regex::new(re)
+                        && let Err(e) = compile_user_regex(re)
                     {
                         errors.push(verr(
                             "V-013",
@@ -599,6 +609,12 @@ where
             visit(entry, &format!("{}.task_responses[{}]", path, ri));
         }
     }
+
+    if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in sampling.iter().enumerate() {
+            visit(entry, &format!("{}.sampling_responses[{}]", path, ri));
+        }
+    }
 }
 
 fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
@@ -610,7 +626,7 @@ fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<Vali
                 if let Some(entry_obj) = pred_entry.as_object()
                     && let Some(re_val) = entry_obj.get("regex")
                     && let Some(re) = re_val.as_str()
-                    && let Err(e) = Regex::new(re)
+                    && let Err(e) = compile_user_regex(re)
                 {
                     errors.push(verr(
                         "V-013",
@@ -686,7 +702,7 @@ fn is_valid_jsonpath_syntax(path: &str) -> bool {
 fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     // Check for unclosed {{ in template strings throughout the document
     for_each_state(doc, |state, path| {
-        check_templates_in_value(state, path, errors);
+        check_templates_in_value(state, path, errors, 0);
     });
     // Also check on_enter action message fields
     for actor_info in collect_actors(doc) {
@@ -698,6 +714,7 @@ fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
                         &action_value,
                         &format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
                         errors,
+                        0,
                     );
                 }
             }
@@ -709,19 +726,23 @@ fn check_templates_in_value(
     value: &serde_json::Value,
     path: &str,
     errors: &mut Vec<ValidationError>,
+    depth: usize,
 ) {
+    if depth > MAX_VALUE_DEPTH {
+        return;
+    }
     match value {
         serde_json::Value::String(s) => {
             check_template_string(s, path, errors);
         }
         serde_json::Value::Array(arr) => {
             for (i, v) in arr.iter().enumerate() {
-                check_templates_in_value(v, &format!("{}[{}]", path, i), errors);
+                check_templates_in_value(v, &format!("{}[{}]", path, i), errors, depth + 1);
             }
         }
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                check_templates_in_value(v, &format!("{}.{}", path, k), errors);
+                check_templates_in_value(v, &format!("{}.{}", path, k), errors, depth + 1);
             }
         }
         _ => {}
@@ -1251,7 +1272,7 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
 fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
     let actor_names = collect_actor_names(doc);
     for_each_state(doc, |state, path| {
-        check_cross_actor_refs_in_value(state, &actor_names, path, errors);
+        check_cross_actor_refs_in_value(state, &actor_names, path, errors, 0);
     });
 }
 
@@ -1260,7 +1281,11 @@ fn check_cross_actor_refs_in_value(
     actor_names: &std::collections::HashSet<String>,
     path: &str,
     errors: &mut Vec<ValidationError>,
+    depth: usize,
 ) {
+    if depth > MAX_VALUE_DEPTH {
+        return;
+    }
     match value {
         serde_json::Value::String(s) => {
             check_cross_actor_refs_in_string(s, actor_names, path, errors);
@@ -1272,6 +1297,7 @@ fn check_cross_actor_refs_in_value(
                     actor_names,
                     &format!("{}[{}]", path, i),
                     errors,
+                    depth + 1,
                 );
             }
         }
@@ -1282,11 +1308,11 @@ fn check_cross_actor_refs_in_value(
                     if let Some(arr) = v.as_array() {
                         let child_path = format!("{}.response", path);
                         for item in arr {
-                            check_cross_actor_refs_in_value(item, actor_names, &child_path, errors);
+                            check_cross_actor_refs_in_value(item, actor_names, &child_path, errors, depth + 1);
                         }
                     }
                 } else {
-                    check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors);
+                    check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors, depth + 1);
                 }
             }
         }
@@ -1390,12 +1416,43 @@ fn check_response_exclusivity(
             for (ri, resp) in task_responses.iter().enumerate() {
                 let has_messages = resp.get("messages").is_some();
                 let has_artifacts = resp.get("artifacts").is_some();
+                let has_history = resp.get("history").is_some();
                 let has_synthesize = resp.get("synthesize").is_some();
-                if (has_messages || has_artifacts) && has_synthesize {
+                if (has_messages || has_artifacts || has_history) && has_synthesize {
                     errors.push(verr(
                         "V-033",
                         format!("{}.task_responses[{}]", path, ri),
                         "messages/artifacts and synthesize are mutually exclusive",
+                    ));
+                }
+            }
+        }
+
+        // MCP sampling_responses
+        if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
+            for (ri, resp) in sampling.iter().enumerate() {
+                let has_content = resp.get("content").is_some();
+                let has_synthesize = resp.get("synthesize").is_some();
+                if has_content && has_synthesize {
+                    errors.push(verr(
+                        "V-033",
+                        format!("{}.sampling_responses[{}]", path, ri),
+                        "content and synthesize are mutually exclusive",
+                    ));
+                }
+            }
+        }
+
+        // MCP elicitation_responses
+        if let Some(elicitation) = obj.get("elicitation_responses").and_then(|v| v.as_array()) {
+            for (ri, resp) in elicitation.iter().enumerate() {
+                let has_content = resp.get("content").is_some();
+                let has_synthesize = resp.get("synthesize").is_some();
+                if has_content && has_synthesize {
+                    errors.push(verr(
+                        "V-033",
+                        format!("{}.elicitation_responses[{}]", path, ri),
+                        "content and synthesize are mutually exclusive",
                     ));
                 }
             }
@@ -1460,6 +1517,15 @@ fn check_catch_all_in_state(
         if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
             check_catch_all_list(task_responses, &format!("{}.task_responses", path), errors);
         }
+
+        // MCP sampling_responses
+        if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(
+                sampling,
+                &format!("{}.sampling_responses", path),
+                errors,
+            );
+        }
     }
 }
 
@@ -1492,7 +1558,7 @@ fn check_catch_all_list(
 
 fn v035_synthesize_prompt(doc: &Document, errors: &mut Vec<ValidationError>) {
     for_each_state(doc, |state, path| {
-        check_synthesize_prompts(state, path, errors);
+        check_synthesize_prompts(state, path, errors, 0);
     });
 }
 
@@ -1500,7 +1566,11 @@ fn check_synthesize_prompts(
     value: &serde_json::Value,
     path: &str,
     errors: &mut Vec<ValidationError>,
+    depth: usize,
 ) {
+    if depth > MAX_VALUE_DEPTH {
+        return;
+    }
     match value {
         serde_json::Value::Object(map) => {
             if let Some(synth) = map.get("synthesize")
@@ -1526,13 +1596,13 @@ fn check_synthesize_prompts(
             }
             for (k, v) in map {
                 if k != "synthesize" {
-                    check_synthesize_prompts(v, &format!("{}.{}", path, k), errors);
+                    check_synthesize_prompts(v, &format!("{}.{}", path, k), errors, depth + 1);
                 }
             }
         }
         serde_json::Value::Array(arr) => {
             for (i, v) in arr.iter().enumerate() {
-                check_synthesize_prompts(v, &format!("{}[{}]", path, i), errors);
+                check_synthesize_prompts(v, &format!("{}[{}]", path, i), errors, depth + 1);
             }
         }
         _ => {}
@@ -1672,16 +1742,6 @@ fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>
         }
     }
 
-    // Validate attack.grace_period duration
-    if let Some(gp) = &doc.attack.grace_period
-        && let Err(e) = crate::primitives::parse_duration(gp)
-    {
-        errors.push(verr(
-            "V-038",
-            "attack.grace_period",
-            format!("invalid duration '{}': {}", gp, e),
-        ));
-    }
 }
 
 // ─── V-039 ──────────────────────────────────────────────────────────────────
@@ -1804,7 +1864,7 @@ fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<Validatio
 
 /// Check if a regex pattern contains at least one unescaped capture group.
 fn has_capture_group(pattern: &str) -> bool {
-    Regex::new(pattern)
+    compile_user_regex(pattern)
         .map(|re| re.captures_len() > 1)
         .unwrap_or(false)
 }
@@ -1850,6 +1910,118 @@ fn v046_phase_mode_matches_actor(doc: &Document, errors: &mut Vec<ValidationErro
     }
 }
 
+// ─── V-047 ──────────────────────────────────────────────────────────────────
+
+fn v047_a2a_client_mutual_exclusivity(doc: &Document, errors: &mut Vec<ValidationError>) {
+    let a2a_client_keys = [
+        "task_message",
+        "task_query",
+        "task_cancel",
+        "task_resubscribe",
+        "push_notification_config",
+        "get_authenticated_extended_card",
+    ];
+
+    let mut check_state = |state: &Value, path: &str| {
+        let Some(obj) = state.as_object() else {
+            return;
+        };
+        let present: Vec<&str> = a2a_client_keys
+            .iter()
+            .copied()
+            .filter(|k| obj.contains_key(*k))
+            .collect();
+        if present.len() > 1 {
+            errors.push(verr(
+                "V-047",
+                path,
+                format!(
+                    "a2a_client state must contain at most one action key, found: {}",
+                    present.join(", ")
+                ),
+            ));
+        }
+        // Check task_message sub-exclusivity: message vs synthesize
+        if let Some(tm) = obj.get("task_message").and_then(|v| v.as_object())
+            && tm.contains_key("message")
+            && tm.contains_key("synthesize")
+        {
+            errors.push(verr(
+                "V-047",
+                format!("{}.task_message", path),
+                "task_message: message and synthesize are mutually exclusive",
+            ));
+        }
+    };
+
+    // Single-state form: use execution.mode
+    if let Some(state) = &doc.attack.execution.state {
+        let mode = doc.attack.execution.mode.as_deref().unwrap_or("");
+        if mode == "a2a_client" {
+            check_state(state, "attack.execution.state");
+        }
+    }
+
+    // Multi-actor/multi-phase forms
+    for actor_info in collect_actors(doc) {
+        if actor_info.mode != Some("a2a_client") {
+            continue;
+        }
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                check_state(
+                    state,
+                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
+                );
+            }
+        }
+    }
+}
+
+// ─── V-048 ──────────────────────────────────────────────────────────────────
+
+fn v048_impact_no_duplicates(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(impact) = &doc.attack.impact {
+        let mut seen = std::collections::HashSet::new();
+        for item in impact {
+            if !seen.insert(item) {
+                errors.push(verr(
+                    "V-048",
+                    "attack.impact",
+                    "impact must not contain duplicate values",
+                ));
+                break;
+            }
+        }
+    }
+}
+
+// ─── V-049 ──────────────────────────────────────────────────────────────────
+
+fn v049_grace_period_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(gp) = &doc.attack.grace_period
+        && let Err(e) = crate::primitives::parse_duration(gp)
+    {
+        errors.push(verr(
+            "V-049",
+            "attack.grace_period",
+            format!("invalid duration '{}': {}", gp, e),
+        ));
+    }
+}
+
+// ─── V-050 ──────────────────────────────────────────────────────────────────
+
+fn v050_correlation_requires_indicators(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if doc.attack.correlation.is_some() && doc.attack.indicators.is_none() {
+        errors.push(verr(
+            "V-050",
+            "attack.correlation",
+            "correlation requires indicators to be present",
+        ));
+    }
+}
+
 // ─── W-001 ──────────────────────────────────────────────────────────────────
 
 fn w001_oatf_key_ordering(doc: &Document, warnings: &mut Vec<Diagnostic>) {
@@ -1871,7 +2043,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
     // Single-phase form has no phase-local extractor declarations.
     if let Some(state) = &doc.attack.execution.state {
         let declared = std::collections::HashSet::new();
-        if check_undeclared_refs_in_value(state, &declared, &actor_names) {
+        if check_undeclared_refs_in_value(state, &declared, &actor_names, 0) {
             warnings.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "W-004".to_string(),
@@ -1894,7 +2066,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
 
             // Check state for template references
             if let Some(state) = &phase.state {
-                has_undeclared |= check_undeclared_refs_in_value(state, &declared, &actor_names);
+                has_undeclared |= check_undeclared_refs_in_value(state, &declared, &actor_names, 0);
             }
 
             // Check on_enter actions for template references
@@ -1902,7 +2074,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
                 for action in actions {
                     let action_value = serde_json::to_value(action).unwrap_or_default();
                     has_undeclared |=
-                        check_undeclared_refs_in_value(&action_value, &declared, &actor_names);
+                        check_undeclared_refs_in_value(&action_value, &declared, &actor_names, 0);
                 }
             }
 
@@ -1923,7 +2095,11 @@ fn check_undeclared_refs_in_value(
     value: &serde_json::Value,
     declared: &std::collections::HashSet<String>,
     actor_names: &std::collections::HashSet<String>,
+    depth: usize,
 ) -> bool {
+    if depth > MAX_VALUE_DEPTH {
+        return false;
+    }
     match value {
         serde_json::Value::String(s) => {
             for cap in TEMPLATE_VAR_RE.captures_iter(s) {
@@ -1942,10 +2118,10 @@ fn check_undeclared_refs_in_value(
         }
         serde_json::Value::Array(arr) => arr
             .iter()
-            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names, depth + 1)),
         serde_json::Value::Object(map) => map
             .values()
-            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names, depth + 1)),
         _ => false,
     }
 }

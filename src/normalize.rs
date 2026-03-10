@@ -248,7 +248,9 @@ fn n006_single_phase_to_multi_actor(doc: &mut Document) {
 fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
     let exec = &doc.attack.execution;
     if exec.phases.is_some() && exec.actors.is_none() {
-        let phases = exec.phases.clone().unwrap();
+        let Some(phases) = exec.phases.clone() else {
+            return;
+        };
         let mode = exec
             .mode
             .clone()

@@ -424,7 +424,8 @@ impl<'de> Deserialize<'de> for Action {
 
         let key = action_key
             .ok_or_else(|| serde::de::Error::custom("action object must have at least one key"))?;
-        let value = action_value.unwrap();
+        let value = action_value
+            .ok_or_else(|| serde::de::Error::custom("action object must have a value"))?;
 
         match key.as_str() {
             "send_notification" => {

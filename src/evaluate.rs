@@ -70,6 +70,12 @@ pub trait GenerationProvider {
 /// Limitations: The `cel` crate (cel-rust) does not support the `matches`
 /// function from the CEL standard without the `regex` feature. The crate's
 /// regex support may differ from RE2 semantics in edge cases.
+///
+/// # Resource Limits
+///
+/// This evaluator does **not** impose execution time or memory limits.
+/// Callers processing untrusted OATF documents should wrap evaluation
+/// in a timeout or provide a custom [`CelEvaluator`] with resource controls.
 #[cfg(feature = "cel-eval")]
 pub struct DefaultCelEvaluator;
 
@@ -123,11 +129,21 @@ impl CelEvaluator for DefaultCelEvaluator {
     }
 }
 
+const MAX_VALUE_DEPTH: usize = 128;
+
 /// Convert serde_json::Value → cel::Value.
 #[cfg(feature = "cel-eval")]
 fn json_to_cel(value: &Value) -> cel::Value {
+    json_to_cel_inner(value, 0)
+}
+
+#[cfg(feature = "cel-eval")]
+fn json_to_cel_inner(value: &Value, depth: usize) -> cel::Value {
     use std::sync::Arc;
 
+    if depth > MAX_VALUE_DEPTH {
+        return cel::Value::Null;
+    }
     match value {
         Value::Null => cel::Value::Null,
         Value::Bool(b) => cel::Value::Bool(*b),
@@ -144,13 +160,13 @@ fn json_to_cel(value: &Value) -> cel::Value {
         }
         Value::String(s) => cel::Value::String(Arc::new(s.clone())),
         Value::Array(arr) => {
-            let items: Vec<cel::Value> = arr.iter().map(json_to_cel).collect();
+            let items: Vec<cel::Value> = arr.iter().map(|v| json_to_cel_inner(v, depth + 1)).collect();
             cel::Value::List(Arc::new(items))
         }
         Value::Object(map) => {
             let entries: HashMap<String, cel::Value> = map
                 .iter()
-                .map(|(k, v)| (k.clone(), json_to_cel(v)))
+                .map(|(k, v)| (k.clone(), json_to_cel_inner(v, depth + 1)))
                 .collect();
             entries.into()
         }
@@ -160,6 +176,14 @@ fn json_to_cel(value: &Value) -> cel::Value {
 /// Convert cel::Value → serde_json::Value.
 #[cfg(feature = "cel-eval")]
 fn cel_to_json(value: &cel::Value) -> Value {
+    cel_to_json_inner(value, 0)
+}
+
+#[cfg(feature = "cel-eval")]
+fn cel_to_json_inner(value: &cel::Value, depth: usize) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return Value::Null;
+    }
     match value {
         cel::Value::Null => Value::Null,
         cel::Value::Bool(b) => Value::Bool(*b),
@@ -169,7 +193,7 @@ fn cel_to_json(value: &cel::Value) -> Value {
             .map(Value::Number)
             .unwrap_or(Value::Null),
         cel::Value::String(s) => Value::String(s.to_string()),
-        cel::Value::List(l) => Value::Array(l.iter().map(cel_to_json).collect()),
+        cel::Value::List(l) => Value::Array(l.iter().map(|v| cel_to_json_inner(v, depth + 1)).collect()),
         cel::Value::Map(m) => {
             let mut obj = serde_json::Map::new();
             for (key, val) in m.map.iter() {
@@ -179,7 +203,7 @@ fn cel_to_json(value: &cel::Value) -> Value {
                     cel::objects::Key::Uint(u) => u.to_string(),
                     cel::objects::Key::Bool(b) => b.to_string(),
                 };
-                obj.insert(k, cel_to_json(val));
+                obj.insert(k, cel_to_json_inner(val, depth + 1));
             }
             Value::Object(obj)
         }
@@ -281,7 +305,7 @@ pub fn evaluate_expression(
             kind: EvaluationErrorKind::TypeError,
             message: format!(
                 "CEL expression returned non-boolean result: {}",
-                serde_json::to_string(&result).unwrap_or_default()
+                serde_json::to_string(&result).unwrap_or_else(|_| "<unserializable>".to_string())
             ),
             indicator_id: None,
         }),
@@ -397,7 +421,7 @@ fn value_to_text(value: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        _ => serde_json::to_string(value).unwrap_or_default(),
+        _ => serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_string()),
     }
 }
 

@@ -21,6 +21,21 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
         });
     }
 
+    const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    if input.len() > MAX_INPUT_SIZE {
+        return Err(ParseError {
+            kind: ParseErrorKind::Syntax,
+            message: format!(
+                "input size {} bytes exceeds maximum of {} bytes",
+                input.len(),
+                MAX_INPUT_SIZE
+            ),
+            path: None,
+            line: None,
+            column: None,
+        });
+    }
+
     // Check for YAML anchors, aliases, and merge keys (V-020)
     // We do a pre-scan of the raw text for anchor/alias markers
     check_yaml_anchors_aliases(input)?;
@@ -210,6 +225,17 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
             return Err(ParseError {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML aliases (*) are not allowed in OATF documents".to_string(),
+                path: None,
+                line: Some(i + 1),
+                column: Some(pos + 1),
+            });
+        }
+
+        // Check for custom YAML tags (! at value position)
+        if let Some(pos) = find_yaml_tag(&in_content) {
+            return Err(ParseError {
+                kind: ParseErrorKind::Syntax,
+                message: "custom YAML tags are not allowed in OATF documents".to_string(),
                 path: None,
                 line: Some(i + 1),
                 column: Some(pos + 1),
@@ -441,6 +467,29 @@ fn find_yaml_alias(line: &str) -> Option<usize> {
             }
         }
         i += 1;
+    }
+    None
+}
+
+/// Find custom YAML tag (`!name`) in a line, returning position if found.
+/// Matches `!` in value position (preceded by space, colon, dash, or at line start)
+/// followed by a non-space character.
+fn find_yaml_tag(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'!' {
+            // Must be in value position
+            if i == 0
+                || bytes[i - 1] == b' '
+                || bytes[i - 1] == b':'
+                || bytes[i - 1] == b'-'
+            {
+                // Must be followed by a non-space char (tag name)
+                if i + 1 < bytes.len() && bytes[i + 1] != b' ' {
+                    return Some(i);
+                }
+            }
+        }
     }
     None
 }

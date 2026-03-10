@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Rust SDK for the [Open Agent Threat Format (OATF)](https://oatf.io).
 //!
 //! OATF is a YAML-based format for describing security threats against AI agent
