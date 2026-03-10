@@ -312,12 +312,21 @@ pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool,
 /// Builds the CEL context by binding `message` and any declared variables,
 /// then delegates to the provided `CelEvaluator`.
 ///
+/// When `cel_evaluator` is `None`, returns `Err(EvaluationError)` indicating
+/// that CEL evaluation is not available.
+///
 /// Non-boolean results produce `EvaluationError { kind: type_error }`.
 pub fn evaluate_expression(
     expression: &ExpressionMatch,
     message: &Value,
-    cel_evaluator: &dyn CelEvaluator,
+    cel_evaluator: Option<&dyn CelEvaluator>,
 ) -> Result<bool, EvaluationError> {
+    let cel_evaluator = cel_evaluator.ok_or_else(|| EvaluationError {
+        kind: EvaluationErrorKind::CelError,
+        message: "CEL evaluator not available".to_string(),
+        indicator_id: None,
+    })?;
+
     // Build CEL context
     let mut context = serde_json::Map::new();
     context.insert("message".to_string(), message.clone());
@@ -364,17 +373,17 @@ pub fn evaluate_indicator(
             Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
         }
     } else if let Some(ref expr) = indicator.expression {
-        match cel_evaluator {
-            None => make_verdict(
+        if cel_evaluator.is_none() {
+            return make_verdict(
                 indicator_id,
                 IndicatorResult::Skipped,
                 Some("CEL evaluator not available".to_string()),
-            ),
-            Some(cel_eval) => match evaluate_expression(expr, message, cel_eval) {
-                Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
-                Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
-                Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
-            },
+            );
+        }
+        match evaluate_expression(expr, message, cel_evaluator) {
+            Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
+            Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
+            Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
         }
     } else if let Some(ref semantic) = indicator.semantic {
         match semantic_evaluator {

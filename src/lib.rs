@@ -68,6 +68,24 @@ pub use parse::parse;
 pub use serialize::serialize;
 pub use validate::validate;
 
+/// Returns the set of known mode strings for v0.1.
+///
+/// These are the modes recognized by the SDK's validation and normalization
+/// logic. Mode values not in this set but matching the `[a-z][a-z0-9_]*_(server|client)`
+/// pattern are accepted with a W-002 warning.
+pub fn known_modes() -> &'static [&'static str] {
+    surface::KNOWN_MODES
+}
+
+/// Returns the set of known protocol identifiers for v0.1.
+///
+/// These are the protocols recognized by the SDK's validation logic.
+/// Protocol values not in this set but matching the `[a-z][a-z0-9_]*`
+/// pattern are accepted with a W-003 warning.
+pub fn known_protocols() -> &'static [&'static str] {
+    surface::KNOWN_PROTOCOLS
+}
+
 /// Result of the [`load`] convenience entry point.
 pub struct LoadResult {
     /// The normalized document.
