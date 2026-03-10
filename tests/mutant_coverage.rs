@@ -112,7 +112,7 @@ fn make_semantic_indicator(id: &str, threshold: f64) -> Indicator {
         confidence: None,
         severity: None,
         false_positives: None,
-        extensions: HashMap::new(),
+        extensions: indexmap::IndexMap::new(),
     }
 }
 
@@ -165,7 +165,7 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         })
         .collect();
 
@@ -188,11 +188,11 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
             state: None,
             phases: None,
             actors: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         },
         indicators: Some(indicators),
         correlation: Some(Correlation { logic: Some(logic) }),
-        extensions: HashMap::new(),
+        extensions: indexmap::IndexMap::new(),
     }
 }
 

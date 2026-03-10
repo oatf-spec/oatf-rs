@@ -18,7 +18,7 @@ fn attack_with_indicators(logic: CorrelationLogic, indicator_ids: &[&str]) -> At
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         })
         .collect();
 
@@ -41,11 +41,11 @@ fn attack_with_indicators(logic: CorrelationLogic, indicator_ids: &[&str]) -> At
             state: None,
             phases: None,
             actors: Some(vec![]),
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         },
         indicators: Some(indicators),
         correlation: Some(Correlation { logic: Some(logic) }),
-        extensions: HashMap::new(),
+        extensions: indexmap::IndexMap::new(),
     }
 }
 

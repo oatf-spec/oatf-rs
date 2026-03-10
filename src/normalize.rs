@@ -227,14 +227,14 @@ fn n006_single_phase_to_multi_actor(doc: &mut Document) {
             extractors: None,
             on_enter: None,
             trigger: None,
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let actor = Actor {
             name: "default".to_string(),
             mode: mode.clone(),
             phases: vec![phase],
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         doc.attack.execution.actors = Some(vec![actor]);
@@ -264,7 +264,7 @@ fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
             name: "default".to_string(),
             mode,
             phases,
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         doc.attack.execution.actors = Some(vec![actor]);

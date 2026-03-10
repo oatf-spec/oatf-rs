@@ -1,8 +1,10 @@
 //! OATF document types per the format specification §2.
 //!
 //! All struct fields follow the specification naming. Extension fields (`x-*` prefixed)
-//! are captured via `#[serde(flatten)] HashMap<String, Value>` on types that support them.
+//! are captured via `#[serde(flatten)] IndexMap<String, Value>` on types that support them,
+//! preserving insertion order so that `serialize` can emit them in their original position.
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -80,7 +82,7 @@ pub struct Attack {
     pub correlation: Option<Correlation>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.3a Correlation ───────────────────────────────────────────────────────
@@ -200,7 +202,7 @@ pub struct Execution {
     pub actors: Option<Vec<Actor>>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.6a Actor ─────────────────────────────────────────────────────────────
@@ -216,7 +218,7 @@ pub struct Actor {
     pub phases: Vec<Phase>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.7 Phase ──────────────────────────────────────────────────────────────
@@ -247,7 +249,7 @@ pub struct Phase {
     pub trigger: Option<Trigger>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.7a Action ────────────────────────────────────────────────────────────
@@ -263,7 +265,7 @@ pub enum Action {
         /// Optional notification parameters.
         params: Option<Value>,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
+        extensions: IndexMap<String, Value>,
     },
     /// Emit a log message.
     Log {
@@ -272,7 +274,7 @@ pub enum Action {
         /// Log level (defaults to `info`).
         level: Option<LogLevel>,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
+        extensions: IndexMap<String, Value>,
     },
     /// Send a user elicitation request.
     SendElicitation {
@@ -288,7 +290,7 @@ pub enum Action {
         /// Elicitation identifier.
         elicitation_id: Option<String>,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
+        extensions: IndexMap<String, Value>,
     },
     /// Binding-specific action with a single unknown key.
     BindingSpecific {
@@ -297,7 +299,7 @@ pub enum Action {
         /// The action value.
         value: Value,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
+        extensions: IndexMap<String, Value>,
     },
 }
 
@@ -398,7 +400,7 @@ impl<'de> Deserialize<'de> for Action {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let map: serde_json::Map<String, Value> = serde_json::Map::deserialize(deserializer)?;
 
-        let mut extensions = HashMap::new();
+        let mut extensions = IndexMap::new();
         let mut action_key = None;
         let mut action_value = None;
         let mut non_ext_key_count = 0usize;
@@ -747,7 +749,7 @@ pub struct Indicator {
     pub false_positives: Option<Vec<String>>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.13 PatternMatch ─────────────────────────────────────────────────────
@@ -1114,5 +1116,5 @@ pub struct ResponseEntry {
     pub synthesize: Option<SynthesizeBlock>,
     /// Protocol-specific static content fields (MCP content, A2A messages, etc.).
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub extra: IndexMap<String, Value>,
 }

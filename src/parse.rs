@@ -148,7 +148,7 @@ fn validate_extension_keys(doc: &Document) -> Result<(), ParseError> {
 }
 
 fn check_extensions(
-    extensions: &std::collections::HashMap<String, serde_json::Value>,
+    extensions: &indexmap::IndexMap<String, serde_json::Value>,
     path: &str,
 ) -> Result<(), ParseError> {
     for key in extensions.keys() {

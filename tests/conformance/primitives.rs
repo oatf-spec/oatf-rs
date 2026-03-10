@@ -602,7 +602,7 @@ fn compute_effective_state_suite() {
                 extractors: None,
                 on_enter: None,
                 trigger: None,
-                extensions: std::collections::HashMap::new(),
+                extensions: indexmap::IndexMap::new(),
             })
             .collect();
 

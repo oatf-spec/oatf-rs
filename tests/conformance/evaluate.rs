@@ -61,7 +61,7 @@ fn evaluate_pattern_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let verdict = evaluate::evaluate_indicator(&indicator, &case.input.message, None, None);
@@ -166,7 +166,7 @@ fn evaluate_expression_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         // When cel-eval feature is disabled, skip tests that require a present evaluator
@@ -317,7 +317,7 @@ fn evaluate_semantic_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let mock_evaluator = case
