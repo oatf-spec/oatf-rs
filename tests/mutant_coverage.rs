@@ -449,7 +449,11 @@ fn evaluate_indicator_errors_on_missing_id() {
         "missing indicator ID must produce Error verdict"
     );
     assert!(
-        verdict.evidence.as_deref().unwrap_or("").contains("normalized"),
+        verdict
+            .evidence
+            .as_deref()
+            .unwrap_or("")
+            .contains("normalized"),
         "error message should mention normalization"
     );
 }
@@ -488,7 +492,10 @@ fn pattern_exists_false_matches_when_target_absent() {
     let message = json!({"tools": [{"name": "t1"}]});
 
     let result = evaluate_pattern(&pattern, &message).unwrap();
-    assert!(result, "exists: false should match when target path does not resolve");
+    assert!(
+        result,
+        "exists: false should match when target path does not resolve"
+    );
 }
 
 #[test]
@@ -523,7 +530,10 @@ fn pattern_exists_false_does_not_match_when_target_present() {
     let message = json!({"tools": [{"name": "t1"}]});
 
     let result = evaluate_pattern(&pattern, &message).unwrap();
-    assert!(!result, "exists: false should NOT match when target resolves to values");
+    assert!(
+        !result,
+        "exists: false should NOT match when target resolves to values"
+    );
 }
 
 #[test]
@@ -559,5 +569,8 @@ fn pattern_exists_false_with_other_ops_always_false() {
     // Even when target is absent, exists:false + contains → always false
     let message = json!({"tools": [{"description": "d"}]});
     let result = evaluate_pattern(&pattern, &message).unwrap();
-    assert!(!result, "exists: false + other operator should always be false");
+    assert!(
+        !result,
+        "exists: false + other operator should always be false"
+    );
 }

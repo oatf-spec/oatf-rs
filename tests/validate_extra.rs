@@ -1083,3 +1083,104 @@ attack:
         "unknown inner fields on known actions must fail parse"
     );
 }
+
+// ─── V-018: Custom protocol indicators skip surface validation ──────────────
+
+#[test]
+fn v018_custom_protocol_skips_surface_validation() {
+    // Custom mode → unrecognized protocol → surface validation skipped
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: custom_server
+    state:
+      tools: []
+  indicators:
+    - surface: custom_surface
+      protocol: custom_proto
+      pattern:
+        target: "$.some.path"
+        contains: "test"
+"#;
+    let errs = errors_for(input, "V-018");
+    assert!(
+        errs.is_empty(),
+        "custom protocol indicators must not produce V-018 errors, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn v018_known_protocol_still_rejects_unknown_surface() {
+    // Known mode (mcp_server) + unknown surface → still V-018 error
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: []
+  indicators:
+    - surface: bogus_surface
+      pattern:
+        contains: "test"
+"#;
+    assert_has_error(input, "V-018");
+}
+
+// ─── Non-object state values must be rejected ───────────────────────────────
+
+#[test]
+fn state_type_rejects_non_object_state() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state: 42
+"#;
+    let errs = errors_for(input, "state-type");
+    assert!(
+        !errs.is_empty(),
+        "non-object state (number) must be rejected"
+    );
+}
+
+#[test]
+fn state_type_rejects_string_state() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state: "hello"
+"#;
+    let errs = errors_for(input, "state-type");
+    assert!(
+        !errs.is_empty(),
+        "non-object state (string) must be rejected"
+    );
+}
+
+#[test]
+fn state_type_accepts_object_state() {
+    let input = r#"
+oatf: "0.1"
+attack:
+  execution:
+    mode: mcp_server
+    state:
+      tools: []
+  indicators:
+    - surface: tool_description
+      pattern:
+        contains: "test"
+"#;
+    let errs = errors_for(input, "state-type");
+    assert!(
+        errs.is_empty(),
+        "object state must not produce state-type errors, got: {:?}",
+        errs
+    );
+}

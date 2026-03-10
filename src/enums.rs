@@ -22,7 +22,7 @@ pub enum SeverityLevel {
 }
 
 /// Categories of harm.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Impact {
     /// Agent behavior is manipulated by an adversary.

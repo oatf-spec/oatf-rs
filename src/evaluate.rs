@@ -160,7 +160,10 @@ fn json_to_cel_inner(value: &Value, depth: usize) -> cel::Value {
         }
         Value::String(s) => cel::Value::String(Arc::new(s.clone())),
         Value::Array(arr) => {
-            let items: Vec<cel::Value> = arr.iter().map(|v| json_to_cel_inner(v, depth + 1)).collect();
+            let items: Vec<cel::Value> = arr
+                .iter()
+                .map(|v| json_to_cel_inner(v, depth + 1))
+                .collect();
             cel::Value::List(Arc::new(items))
         }
         Value::Object(map) => {
@@ -193,7 +196,9 @@ fn cel_to_json_inner(value: &cel::Value, depth: usize) -> Value {
             .map(Value::Number)
             .unwrap_or(Value::Null),
         cel::Value::String(s) => Value::String(s.to_string()),
-        cel::Value::List(l) => Value::Array(l.iter().map(|v| cel_to_json_inner(v, depth + 1)).collect()),
+        cel::Value::List(l) => {
+            Value::Array(l.iter().map(|v| cel_to_json_inner(v, depth + 1)).collect())
+        }
         cel::Value::Map(m) => {
             let mut obj = serde_json::Map::new();
             for (key, val) in m.map.iter() {
@@ -245,11 +250,7 @@ fn now_iso8601() -> String {
     )
 }
 
-fn make_verdict(
-    id: String,
-    result: IndicatorResult,
-    evidence: Option<String>,
-) -> IndicatorVerdict {
+fn make_verdict(id: String, result: IndicatorResult, evidence: Option<String>) -> IndicatorVerdict {
     IndicatorVerdict {
         indicator_id: id,
         result,
@@ -396,7 +397,8 @@ pub fn evaluate_indicator(
                 "<missing-id>".to_string(),
                 IndicatorResult::Error,
                 Some(
-                    "indicator has no id; document must be normalized before evaluation".to_string(),
+                    "indicator has no id; document must be normalized before evaluation"
+                        .to_string(),
                 ),
             );
         }

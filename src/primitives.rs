@@ -672,7 +672,9 @@ fn value_to_string(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         // Objects and arrays serialize to compact JSON with keys sorted
         // lexicographically per spec §5.3.
-        _ => serde_json::to_string(&sort_keys(v)).unwrap_or_else(|_| "<unserializable>".to_string()),
+        _ => {
+            serde_json::to_string(&sort_keys(v)).unwrap_or_else(|_| "<unserializable>".to_string())
+        }
     }
 }
 
@@ -697,7 +699,9 @@ fn sort_keys_inner(v: &Value, depth: usize) -> Value {
             }
             Value::Object(sorted)
         }
-        Value::Array(arr) => Value::Array(arr.iter().map(|v| sort_keys_inner(v, depth + 1)).collect()),
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|v| sort_keys_inner(v, depth + 1)).collect())
+        }
         _ => v.clone(),
     }
 }
@@ -753,8 +757,14 @@ fn interpolate_value_inner(
             let new_map: serde_json::Map<String, Value> = map
                 .iter()
                 .map(|(k, v)| {
-                    let new_v =
-                        interpolate_value_inner(v, extractors, request, response, diagnostics, depth + 1);
+                    let new_v = interpolate_value_inner(
+                        v,
+                        extractors,
+                        request,
+                        response,
+                        diagnostics,
+                        depth + 1,
+                    );
                     (k.clone(), new_v)
                 })
                 .collect();
@@ -763,7 +773,16 @@ fn interpolate_value_inner(
         Value::Array(arr) => {
             let new_arr: Vec<Value> = arr
                 .iter()
-                .map(|v| interpolate_value_inner(v, extractors, request, response, diagnostics, depth + 1))
+                .map(|v| {
+                    interpolate_value_inner(
+                        v,
+                        extractors,
+                        request,
+                        response,
+                        diagnostics,
+                        depth + 1,
+                    )
+                })
                 .collect();
             Value::Array(new_arr)
         }

@@ -1011,11 +1011,7 @@ fn parse_event_qualifier_suite() {
         failed,
         cases.len()
     );
-    assert_eq!(
-        failed, 0,
-        "{} parse_event_qualifier tests failed",
-        failed
-    );
+    assert_eq!(failed, 0, "{} parse_event_qualifier tests failed", failed);
 }
 
 // --- select_response ---------------------------------------------------------
@@ -1068,7 +1064,11 @@ fn select_response_suite() {
                 ResponseEntry {
                     when,
                     synthesize: None,
-                    extra: e.extra.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    extra: e
+                        .extra
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
                 }
             })
             .collect();
@@ -1078,7 +1078,13 @@ fn select_response_suite() {
         let result_value = match result {
             Some(entry) => {
                 // Reconstruct the value to compare: take extra fields
-                Value::Object(entry.extra.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                Value::Object(
+                    entry
+                        .extra
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                )
             }
             None => Value::Null,
         };

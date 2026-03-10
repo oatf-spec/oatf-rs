@@ -103,7 +103,6 @@ static CROSS_ACTOR_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
 static CEL_ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
-
 static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
 /// Validate a parsed document against all conformance rules (V-001..V-046).
@@ -121,6 +120,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v007_phases_non_empty(doc, &mut errors);
     v008_terminal_phase(doc, &mut errors);
     v009_first_phase_state(doc, &mut errors);
+    check_state_is_object(doc, &mut errors);
     v010_unique_indicator_ids(doc, &mut errors);
     v011_unique_phase_names(doc, &mut errors);
     v012_exactly_one_detection_key(doc, &mut errors);
@@ -234,15 +234,19 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
     // Validate elicitation_responses action enum in state
-    let check_elicitation_responses = |state: &Value, path_prefix: &str, errors: &mut Vec<ValidationError>| {
-        if let Some(entries) = state.get("elicitation_responses").and_then(|v| v.as_array()) {
-            static VALID_ELICITATION_ACTIONS: &[&str] = &["accept", "decline", "cancel"];
-            for (ei, entry) in entries.iter().enumerate() {
-                if let Some(action_val) = entry.get("action") {
-                    match action_val.as_str() {
-                        Some(action) if VALID_ELICITATION_ACTIONS.contains(&action) => {}
-                        Some(action) => {
-                            errors.push(verr(
+    let check_elicitation_responses =
+        |state: &Value, path_prefix: &str, errors: &mut Vec<ValidationError>| {
+            if let Some(entries) = state
+                .get("elicitation_responses")
+                .and_then(|v| v.as_array())
+            {
+                static VALID_ELICITATION_ACTIONS: &[&str] = &["accept", "decline", "cancel"];
+                for (ei, entry) in entries.iter().enumerate() {
+                    if let Some(action_val) = entry.get("action") {
+                        match action_val.as_str() {
+                            Some(action) if VALID_ELICITATION_ACTIONS.contains(&action) => {}
+                            Some(action) => {
+                                errors.push(verr(
                                 "V-005",
                                 format!("{}.elicitation_responses[{}].action", path_prefix, ei),
                                 format!(
@@ -250,22 +254,22 @@ fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
                                     action
                                 ),
                             ));
-                        }
-                        None => {
-                            errors.push(verr(
-                                "V-005",
-                                format!("{}.elicitation_responses[{}].action", path_prefix, ei),
-                                format!(
-                                    "elicitation_responses action must be a string, got {}",
-                                    action_val
-                                ),
-                            ));
+                            }
+                            None => {
+                                errors.push(verr(
+                                    "V-005",
+                                    format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                                    format!(
+                                        "elicitation_responses action must be a string, got {}",
+                                        action_val
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
             }
-        }
-    };
+        };
 
     // Check execution.state
     if let Some(state) = &doc.attack.execution.state {
@@ -545,6 +549,33 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
+/// §2.7: state uses Value for diagnostic reporting but validation rejects non-object values.
+fn check_state_is_object(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for_each_state(doc, |state, path| {
+        if !state.is_object() {
+            errors.push(verr(
+                "state-type",
+                path,
+                format!(
+                    "state must be a YAML mapping (object), got {}",
+                    json_type_name(state)
+                ),
+            ));
+        }
+    });
+}
+
+fn json_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 fn for_each_state<F>(doc: &Document, mut visit: F)
 where
     F: FnMut(&serde_json::Value, &str),
@@ -811,6 +842,17 @@ fn v018_surface_protocol(
 ) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
+            let inferred = infer_execution_protocol(&doc.attack.execution);
+            let protocol = ind.protocol.as_deref().or(inferred.as_deref());
+
+            // §2.21: For indicators targeting unrecognized protocols (not in
+            // the registry), skip surface validation — require explicit targets
+            // instead (handled by the user, not auto-resolved by N-004).
+            let is_known_protocol = protocol.is_some_and(|proto| KNOWN_PROTOCOLS.contains(&proto));
+            if !is_known_protocol {
+                continue;
+            }
+
             let Some(entry) = lookup_surface(&ind.surface) else {
                 errors.push(verr(
                     "V-018",
@@ -819,21 +861,15 @@ fn v018_surface_protocol(
                 ));
                 continue;
             };
-            let inferred = infer_execution_protocol(&doc.attack.execution);
-            let protocol = ind
-                .protocol
-                .as_deref()
-                .or(inferred.as_deref());
-            if let Some(proto) = protocol
-                && KNOWN_PROTOCOLS.contains(&proto)
-                && entry.protocol != proto
-            {
+            if entry.protocol != protocol.unwrap() {
                 errors.push(verr(
                     "V-018",
                     format!("attack.indicators[{}].surface", i),
                     format!(
                         "surface '{}' is for protocol '{}', but indicator targets '{}'",
-                        ind.surface, entry.protocol, proto
+                        ind.surface,
+                        entry.protocol,
+                        protocol.unwrap()
                     ),
                 ));
             }
@@ -1308,11 +1344,23 @@ fn check_cross_actor_refs_in_value(
                     if let Some(arr) = v.as_array() {
                         let child_path = format!("{}.response", path);
                         for item in arr {
-                            check_cross_actor_refs_in_value(item, actor_names, &child_path, errors, depth + 1);
+                            check_cross_actor_refs_in_value(
+                                item,
+                                actor_names,
+                                &child_path,
+                                errors,
+                                depth + 1,
+                            );
                         }
                     }
                 } else {
-                    check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors, depth + 1);
+                    check_cross_actor_refs_in_value(
+                        v,
+                        actor_names,
+                        &format!("{}.{}", path, k),
+                        errors,
+                        depth + 1,
+                    );
                 }
             }
         }
@@ -1520,11 +1568,7 @@ fn check_catch_all_in_state(
 
         // MCP sampling_responses
         if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
-            check_catch_all_list(
-                sampling,
-                &format!("{}.sampling_responses", path),
-                errors,
-            );
+            check_catch_all_list(sampling, &format!("{}.sampling_responses", path), errors);
         }
     }
 }
@@ -1741,7 +1785,6 @@ fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>
             }
         }
     }
-
 }
 
 // ─── V-039 ──────────────────────────────────────────────────────────────────
@@ -1899,10 +1942,7 @@ fn v046_phase_mode_matches_actor(doc: &Document, errors: &mut Vec<ValidationErro
                     errors.push(verr(
                         "V-046",
                         format!("attack.execution.actors[{}].phases[{}].mode", ai, pi),
-                        format!(
-                            "phase mode '{}' must match actor mode '{}'",
-                            pm, actor.mode
-                        ),
+                        format!("phase mode '{}' must match actor mode '{}'", pm, actor.mode),
                     ));
                 }
             }

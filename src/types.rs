@@ -642,7 +642,10 @@ impl<'de> Deserialize<'de> for MatchEntry {
         match &value {
             Value::Object(map) => {
                 // Check if it looks like a MatchCondition (has operator keys)
-                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
+                if map
+                    .keys()
+                    .any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
+                {
                     let cond: MatchCondition =
                         serde_json::from_value(value).map_err(serde::de::Error::custom)?;
                     Ok(MatchEntry::Condition(cond))
@@ -938,7 +941,10 @@ impl Condition {
     pub fn from_value(v: Value) -> Result<Self, String> {
         match &v {
             Value::Object(map) => {
-                if map.keys().any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str())) {
+                if map
+                    .keys()
+                    .any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
+                {
                     let cond: MatchCondition = serde_json::from_value(v)
                         .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
                     Ok(Condition::Operators(cond))

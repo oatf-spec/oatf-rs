@@ -479,11 +479,7 @@ fn find_yaml_tag(line: &str) -> Option<usize> {
     for i in 0..bytes.len() {
         if bytes[i] == b'!' {
             // Must be in value position
-            if i == 0
-                || bytes[i - 1] == b' '
-                || bytes[i - 1] == b':'
-                || bytes[i - 1] == b'-'
-            {
+            if i == 0 || bytes[i - 1] == b' ' || bytes[i - 1] == b':' || bytes[i - 1] == b'-' {
                 // Must be followed by a non-space char (tag name)
                 if i + 1 < bytes.len() && bytes[i + 1] != b' ' {
                     return Some(i);
