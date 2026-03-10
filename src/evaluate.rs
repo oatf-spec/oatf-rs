@@ -284,6 +284,9 @@ fn build_attack_verdict(
 ///
 /// Returns `Ok(true)` if any resolved value matches the condition.
 /// Returns `Ok(false)` if no values match or if the target resolves to nothing.
+///
+/// The `exists` operator is handled at the pattern level (not by `evaluate_condition`,
+/// per §5.3), mirroring the path-resolution semantics of `evaluate_predicate` (§5.4).
 pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool, EvaluationError> {
     let target = pattern.target.as_deref().unwrap_or("");
     let condition = match &pattern.condition {
@@ -292,6 +295,28 @@ pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool,
     };
 
     let resolved = resolve_wildcard_path(target, message);
+
+    // Handle `exists` at the pattern level. Per §5.3, `exists` is evaluated
+    // during path resolution, not by `evaluate_condition`.
+    if let Condition::Operators(cond) = condition
+        && cond.exists == Some(false)
+    {
+        // exists: false + other operators → always false (AND with false)
+        let has_other_ops = cond.contains.is_some()
+            || cond.starts_with.is_some()
+            || cond.ends_with.is_some()
+            || cond.regex.is_some()
+            || cond.any_of.is_some()
+            || cond.gt.is_some()
+            || cond.lt.is_some()
+            || cond.gte.is_some()
+            || cond.lte.is_some();
+        if has_other_ops {
+            return Ok(false);
+        }
+        return Ok(resolved.is_empty());
+    }
+
     if resolved.is_empty() {
         return Ok(false);
     }
@@ -364,7 +389,18 @@ pub fn evaluate_indicator(
     cel_evaluator: Option<&dyn CelEvaluator>,
     semantic_evaluator: Option<&dyn SemanticEvaluator>,
 ) -> IndicatorVerdict {
-    let indicator_id = indicator.id.clone().unwrap_or_default();
+    let indicator_id = match &indicator.id {
+        Some(id) => id.clone(),
+        None => {
+            return make_verdict(
+                "<missing-id>".to_string(),
+                IndicatorResult::Error,
+                Some(
+                    "indicator has no id; document must be normalized before evaluation".to_string(),
+                ),
+            );
+        }
+    };
 
     if let Some(ref pattern) = indicator.pattern {
         match evaluate_pattern(pattern, message) {
