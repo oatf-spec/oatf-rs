@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 /// An entry in the event-mode validity registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventModeEntry {
@@ -284,7 +282,7 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
 ];
 
-/// Look up an event entry by its base event name (qualifier stripped).
+/// Look up an event entry by name.
 pub fn lookup_event(event: &str) -> Option<&'static EventModeEntry> {
     EVENT_MODE_REGISTRY.iter().find(|e| e.event == event)
 }
@@ -293,92 +291,6 @@ pub fn lookup_event(event: &str) -> Option<&'static EventModeEntry> {
 /// Returns None if the event is not in the registry (unrecognized event).
 pub fn is_event_valid_for_mode(event_base: &str, mode: &str) -> Option<bool> {
     lookup_event(event_base).map(|entry| entry.valid_modes.contains(&mode))
-}
-
-/// Strip qualifier from event string: "tools/call:calculator" -> "tools/call"
-pub fn strip_event_qualifier(event: &str) -> &str {
-    event.split(':').next().unwrap_or(event)
-}
-
-// ─── Qualifier Resolution Registry (§7) ─────────────────────────────────────
-
-struct QualifierResolutionEntry {
-    protocol: &'static str,
-    event: &'static str,
-    content_path: &'static str,
-}
-
-static QUALIFIER_RESOLUTION_REGISTRY: &[QualifierResolutionEntry] = &[
-    // MCP (§7.1.2)
-    QualifierResolutionEntry {
-        protocol: "mcp",
-        event: "tools/call",
-        content_path: "params.name",
-    },
-    QualifierResolutionEntry {
-        protocol: "mcp",
-        event: "prompts/get",
-        content_path: "params.name",
-    },
-    // A2A (§7.2.2)
-    QualifierResolutionEntry {
-        protocol: "a2a",
-        event: "task/status",
-        content_path: "status.state",
-    },
-    // AG-UI (§7.3.2)
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "tool_call_start",
-        content_path: "toolCallName",
-    },
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "tool_call_args",
-        content_path: "toolCallName",
-    },
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "tool_call_end",
-        content_path: "toolCallName",
-    },
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "custom",
-        content_path: "name",
-    },
-];
-
-fn lookup_qualifier_path(protocol: &str, event_base: &str) -> Option<&'static str> {
-    QUALIFIER_RESOLUTION_REGISTRY
-        .iter()
-        .find(|e| e.protocol == protocol && e.event == event_base)
-        .map(|e| e.content_path)
-}
-
-/// Resolves the qualifier for a given event base type from event content.
-///
-/// Looks up the content path in the qualifier resolution registry (§7) keyed
-/// by `(protocol, base_event)` and resolves it via
-/// [`crate::primitives::resolve_simple_path`]. Returns `None` if there is no
-/// registry entry for this protocol/event pair, the path does not resolve, or
-/// the resolved value is null/array/object.
-///
-/// Strings are returned unchanged; numbers and booleans use canonical JSON
-/// encoding (e.g. `true` → `"true"`, `42` → `"42"`).
-pub fn resolve_event_qualifier(
-    protocol: &str,
-    event_base: &str,
-    content: &Value,
-) -> Option<String> {
-    let path = lookup_qualifier_path(protocol, event_base)?;
-    let value = crate::primitives::resolve_simple_path(path, content)?;
-    match &value {
-        Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        _ => None, // null, array, object → None
-    }
 }
 
 /// Extract the protocol component from a mode string.

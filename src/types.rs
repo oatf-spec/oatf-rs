@@ -258,11 +258,11 @@ pub struct Phase {
 /// Tagged union with known variants + catch-all for binding-specific actions.
 #[derive(Clone, Debug)]
 pub enum Action {
-    /// Send a protocol notification message.
-    SendNotification {
-        /// Notification method name.
+    /// Send a protocol message.
+    Send {
+        /// Method name.
         method: String,
-        /// Optional notification parameters.
+        /// Optional parameters.
         params: Option<Value>,
         /// Extension fields (`x-*` prefixed).
         extensions: IndexMap<String, Value>,
@@ -273,22 +273,6 @@ pub enum Action {
         message: String,
         /// Log level (defaults to `info`).
         level: Option<LogLevel>,
-        /// Extension fields (`x-*` prefixed).
-        extensions: IndexMap<String, Value>,
-    },
-    /// Send a user elicitation request.
-    SendElicitation {
-        /// Elicitation message text.
-        message: String,
-        /// Elicitation mode (`form` or `url`).
-        mode: Option<ElicitationMode>,
-        /// JSON Schema for form-mode elicitation.
-        #[allow(non_snake_case)]
-        requested_schema: Option<Value>,
-        /// URL for url-mode elicitation.
-        url: Option<String>,
-        /// Elicitation identifier.
-        elicitation_id: Option<String>,
         /// Extension fields (`x-*` prefixed).
         extensions: IndexMap<String, Value>,
     },
@@ -307,7 +291,7 @@ impl Serialize for Action {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
-            Action::SendNotification {
+            Action::Send {
                 method,
                 params,
                 extensions,
@@ -319,7 +303,7 @@ impl Serialize for Action {
                 if let Some(p) = params {
                     inner.insert("params".to_string(), p.clone());
                 }
-                outer.serialize_entry("send_notification", &Value::Object(inner))?;
+                outer.serialize_entry("send", &Value::Object(inner))?;
                 for (k, v) in extensions {
                     outer.serialize_entry(k, v)?;
                 }
@@ -341,39 +325,6 @@ impl Serialize for Action {
                     );
                 }
                 outer.serialize_entry("log", &Value::Object(inner))?;
-                for (k, v) in extensions {
-                    outer.serialize_entry(k, v)?;
-                }
-                outer.end()
-            }
-            Action::SendElicitation {
-                message,
-                mode,
-                requested_schema,
-                url,
-                elicitation_id,
-                extensions,
-                ..
-            } => {
-                let mut outer = serializer.serialize_map(None)?;
-                let mut inner = serde_json::Map::new();
-                inner.insert("message".to_string(), Value::String(message.clone()));
-                if let Some(m) = mode {
-                    inner.insert(
-                        "mode".to_string(),
-                        serde_json::to_value(m).unwrap_or(Value::Null),
-                    );
-                }
-                if let Some(rs) = requested_schema {
-                    inner.insert("requestedSchema".to_string(), rs.clone());
-                }
-                if let Some(u) = url {
-                    inner.insert("url".to_string(), Value::String(u.clone()));
-                }
-                if let Some(eid) = elicitation_id {
-                    inner.insert("elicitationId".to_string(), Value::String(eid.clone()));
-                }
-                outer.serialize_entry("send_elicitation", &Value::Object(inner))?;
                 for (k, v) in extensions {
                     outer.serialize_entry(k, v)?;
                 }
@@ -430,14 +381,14 @@ impl<'de> Deserialize<'de> for Action {
             .ok_or_else(|| serde::de::Error::custom("action object must have a value"))?;
 
         match key.as_str() {
-            "send_notification" => {
-                let obj = value.as_object().ok_or_else(|| {
-                    serde::de::Error::custom("send_notification must be an object")
-                })?;
+            "send" => {
+                let obj = value
+                    .as_object()
+                    .ok_or_else(|| serde::de::Error::custom("send must be an object"))?;
                 for field in obj.keys() {
                     if field != "method" && field != "params" {
                         return Err(serde::de::Error::custom(format!(
-                            "send_notification has unknown field '{}'",
+                            "send has unknown field '{}'",
                             field
                         )));
                     }
@@ -445,10 +396,10 @@ impl<'de> Deserialize<'de> for Action {
                 let method = obj
                     .get("method")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| serde::de::Error::custom("send_notification requires 'method'"))?
+                    .ok_or_else(|| serde::de::Error::custom("send requires 'method'"))?
                     .to_string();
                 let params = obj.get("params").cloned();
-                Ok(Action::SendNotification {
+                Ok(Action::Send {
                     method,
                     params,
                     extensions,
@@ -479,51 +430,6 @@ impl<'de> Deserialize<'de> for Action {
                 Ok(Action::Log {
                     message,
                     level,
-                    extensions,
-                })
-            }
-            "send_elicitation" => {
-                let obj = value.as_object().ok_or_else(|| {
-                    serde::de::Error::custom("send_elicitation must be an object")
-                })?;
-                for field in obj.keys() {
-                    if field != "message"
-                        && field != "mode"
-                        && field != "requestedSchema"
-                        && field != "url"
-                        && field != "elicitationId"
-                    {
-                        return Err(serde::de::Error::custom(format!(
-                            "send_elicitation has unknown field '{}'",
-                            field
-                        )));
-                    }
-                }
-                let message = obj
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| serde::de::Error::custom("send_elicitation requires 'message'"))?
-                    .to_string();
-                let mode = obj
-                    .get("mode")
-                    .map(|v| serde_json::from_value(v.clone()))
-                    .transpose()
-                    .map_err(serde::de::Error::custom)?;
-                let requested_schema = obj.get("requestedSchema").cloned();
-                let url = obj
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let elicitation_id = obj
-                    .get("elicitationId")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                Ok(Action::SendElicitation {
-                    message,
-                    mode,
-                    requested_schema,
-                    url,
-                    elicitation_id,
                     extensions,
                 })
             }
@@ -727,8 +633,20 @@ pub struct Indicator {
     /// Protocol this indicator applies to (e.g., `"mcp"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
-    /// Attack surface name (e.g., `"mcp:tool_call"`).
-    pub surface: String,
+    /// Protocol operation name (e.g., `"tools/call"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    /// Target path within the protocol message.
+    pub target: String,
+    /// Actor name this indicator is scoped to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// Message direction filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Direction>,
+    /// Detection method hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<IndicatorMethod>,
     /// Human-readable indicator description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

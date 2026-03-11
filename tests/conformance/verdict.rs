@@ -87,7 +87,11 @@ fn run_verdict_suite(filename: &str) {
             .map(|i| Indicator {
                 id: Some(i.id.clone()),
                 protocol: None,
-                surface: "test".to_string(),
+                surface: Some("test".to_string()),
+                target: String::new(),
+                actor: None,
+                direction: None,
+                method: None,
                 description: None,
                 pattern: None,
                 expression: None,

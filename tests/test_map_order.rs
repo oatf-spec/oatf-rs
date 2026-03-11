@@ -22,7 +22,8 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: "test"
 "#;

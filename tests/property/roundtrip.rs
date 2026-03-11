@@ -39,7 +39,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test"#,
     )
@@ -66,10 +67,12 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
-    - surface: tool_output
+    - surface: tools/call
+      target: "tools[*].output"
       pattern:
         regex: "secret.*"
   classification:

@@ -20,8 +20,6 @@ pub(crate) fn compile_user_regex(pattern: &str) -> Result<Regex, regex::Error> {
 
 // Re-export extract_protocol from event_registry (§5.10)
 pub use crate::event_registry::extract_protocol;
-// Re-export resolve_event_qualifier from event_registry (§7)
-pub use crate::event_registry::resolve_event_qualifier;
 
 // ─── §5.1.1 resolve_simple_path ─────────────────────────────────────────────
 
@@ -886,18 +884,15 @@ pub fn select_response<'a>(
 
 /// Evaluates whether a trigger condition is satisfied for phase advancement.
 ///
-/// `protocol` identifies the wire protocol (e.g. `"mcp"`, `"a2a"`, `"ag_ui"`)
-/// and is used to key the qualifier resolution registry.
-///
 /// `state` is a mutable reference to per-trigger state that persists across
 /// calls. The SDK increments `state.event_count` only when the incoming event
-/// fully matches (base type + qualifier + predicate).
+/// fully matches (event type + predicate).
 pub fn evaluate_trigger(
     trigger: &Trigger,
     event: Option<&ProtocolEvent>,
     elapsed: Duration,
     state: &mut TriggerState,
-    protocol: &str,
+    _protocol: &str,
 ) -> TriggerResult {
     // 1. Check timeout
     if let Some(after) = &trigger.after
@@ -911,33 +906,18 @@ pub fn evaluate_trigger(
 
     // 2. Check event match
     if let (Some(trigger_event), Some(ev)) = (&trigger.event, event) {
-        let (trigger_base, trigger_qualifier) = parse_event_qualifier(trigger_event);
-        let (event_base, _) = parse_event_qualifier(&ev.event_type);
-
-        if trigger_base != event_base {
+        if trigger_event != &ev.event_type {
             return TriggerResult::NotAdvanced;
         }
 
-        // 3. Qualifier comparison (if trigger specifies one)
-        if let Some(tq) = trigger_qualifier {
-            // §5.8 step 2c-i: event.qualifier first, then content-based resolution
-            let resolved = ev.qualifier.clone().or_else(|| {
-                crate::event_registry::resolve_event_qualifier(protocol, event_base, &ev.content)
-            });
-            match resolved {
-                Some(ref eq) if eq == tq => {} // match
-                _ => return TriggerResult::NotAdvanced,
-            }
-        }
-
-        // 4. Check match predicate if present
+        // 3. Check match predicate if present
         if let Some(predicate) = &trigger.match_predicate
             && !evaluate_predicate(predicate, &ev.content)
         {
             return TriggerResult::NotAdvanced;
         }
 
-        // 5. Full match — increment count, then check threshold
+        // 4. Full match — increment count, then check threshold
         state.event_count += 1;
         // Defensive clamp for callers that bypass validate(): count must be >= 1.
         let required_count = trigger.count.unwrap_or(1).max(1) as u64;
@@ -949,18 +929,6 @@ pub fn evaluate_trigger(
     }
 
     TriggerResult::NotAdvanced
-}
-
-// ─── §5.9 parse_event_qualifier ─────────────────────────────────────────────
-
-/// Splits an event type string on the first `:` separator.
-///
-/// Returns `(base_event, optional_qualifier)`.
-pub fn parse_event_qualifier(event_string: &str) -> (&str, Option<&str>) {
-    match event_string.split_once(':') {
-        Some((base, qualifier)) => (base, Some(qualifier)),
-        None => (event_string, None),
-    }
 }
 
 // ─── §5.11 compute_effective_state ──────────────────────────────────────────

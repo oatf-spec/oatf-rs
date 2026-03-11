@@ -1,11 +1,10 @@
-//! Idempotent document normalization (N-001 through N-008).
+//! Idempotent document normalization (N-001 through N-007).
 //!
 //! Converts all execution forms to canonical multi-actor form, expands defaults,
 //! and resolves shorthand patterns. `normalize(normalize(doc)) == normalize(doc)`.
 
 use crate::enums::*;
 use crate::event_registry::infer_execution_protocol;
-use crate::surface::lookup_surface;
 use crate::types::*;
 
 /// Normalize a validated document into its canonical fully-expanded form.
@@ -32,9 +31,6 @@ pub fn normalize(mut doc: Document) -> Document {
 
     // N-005: Expand pattern shorthand to standard form
     n005_expand_pattern_shorthand(&mut doc);
-
-    // N-008: Apply MCP tool field defaults
-    n008_mcp_tool_defaults(&mut doc);
 
     doc
 }
@@ -160,25 +156,21 @@ fn n003_auto_generate_indicator_ids(doc: &mut Document) {
     }
 }
 
-// ─── N-004: Resolve pattern/semantic targets from surface registry ───────────
+// ─── N-004: Resolve pattern/semantic targets from indicator target ────────────
 
 fn n004_resolve_targets(doc: &mut Document) {
     if let Some(indicators) = &mut doc.attack.indicators {
         for ind in indicators.iter_mut() {
-            let surface_entry = lookup_surface(&ind.surface);
-
             if let Some(ref mut pattern) = ind.pattern
                 && pattern.target.is_none()
-                && let Some(entry) = surface_entry
             {
-                pattern.target = Some(entry.default_target.to_string());
+                pattern.target = Some(ind.target.clone());
             }
 
             if let Some(ref mut semantic) = ind.semantic
                 && semantic.target.is_none()
-                && let Some(entry) = surface_entry
             {
-                semantic.target = Some(entry.default_target.to_string());
+                semantic.target = Some(ind.target.clone());
             }
         }
     }
@@ -270,49 +262,5 @@ fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
         doc.attack.execution.actors = Some(vec![actor]);
         doc.attack.execution.phases = None;
         doc.attack.execution.mode = None;
-    }
-}
-
-// ─── N-008: Apply MCP tool field defaults ────────────────────────────────────
-
-fn n008_mcp_tool_defaults(doc: &mut Document) {
-    if let Some(actors) = &mut doc.attack.execution.actors {
-        for actor in actors.iter_mut() {
-            if actor.mode != "mcp_server" {
-                continue;
-            }
-
-            for phase in &mut actor.phases {
-                if let Some(ref mut state) = phase.state {
-                    apply_mcp_tool_defaults(state);
-                }
-            }
-        }
-    }
-}
-
-fn apply_mcp_tool_defaults(state: &mut serde_json::Value) {
-    if let Some(obj) = state.as_object_mut()
-        && let Some(tools) = obj.get_mut("tools")
-        && let Some(tools_arr) = tools.as_array_mut()
-    {
-        for tool in tools_arr.iter_mut() {
-            if let Some(tool_obj) = tool.as_object_mut() {
-                // inputSchema defaults to {"type": "object"}
-                if !tool_obj.contains_key("inputSchema") {
-                    tool_obj.insert(
-                        "inputSchema".to_string(),
-                        serde_json::json!({"type": "object"}),
-                    );
-                }
-                // description defaults to ""
-                if !tool_obj.contains_key("description") {
-                    tool_obj.insert(
-                        "description".to_string(),
-                        serde_json::Value::String(String::new()),
-                    );
-                }
-            }
-        }
     }
 }

@@ -15,7 +15,8 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: malicious
 "#;

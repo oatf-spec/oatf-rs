@@ -16,7 +16,8 @@ fn load_rejects_invalid_document() {
 oatf: "0.1"
 attack:
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -46,7 +47,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -98,7 +100,11 @@ fn make_semantic_indicator(id: &str, threshold: f64) -> Indicator {
     Indicator {
         id: Some(id.to_string()),
         protocol: None,
-        surface: "tool_description".to_string(),
+        surface: Some("tools/call".to_string()),
+        target: String::new(),
+        actor: None,
+        direction: None,
+        method: None,
         description: None,
         pattern: None,
         expression: None,
@@ -157,7 +163,11 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
         .map(|id| Indicator {
             id: Some(id.to_string()),
             protocol: None,
-            surface: "tool_description".to_string(),
+            surface: Some("tools/call".to_string()),
+            target: String::new(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: None,
@@ -323,7 +333,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -362,7 +373,8 @@ attack:
               event: tools/call
           - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -390,7 +402,8 @@ attack:
           inputSchema:
             type: object
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -418,7 +431,11 @@ fn evaluate_indicator_errors_on_missing_id() {
     let indicator = Indicator {
         id: None, // not normalized — missing ID
         protocol: None,
-        surface: "tool_description".to_string(),
+        surface: Some("tools/call".to_string()),
+        target: String::new(),
+        actor: None,
+        direction: None,
+        method: None,
         description: None,
         pattern: Some(oatf::types::PatternMatch {
             target: Some("".to_string()),

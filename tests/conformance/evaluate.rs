@@ -29,7 +29,8 @@ struct PatternInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct PatternIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     pattern: Value,
 }
 
@@ -54,6 +55,10 @@ fn evaluate_pattern_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: Some(pattern),
             expression: None,
@@ -119,7 +124,8 @@ struct ExpressionInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct ExpressionIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     expression: ExpressionMatchDef,
 }
 
@@ -159,6 +165,10 @@ fn evaluate_expression_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: Some(expr),
@@ -244,7 +254,8 @@ struct SemanticInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct SemanticIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     semantic: SemanticMatchDef,
 }
 
@@ -310,6 +321,10 @@ fn evaluate_semantic_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: None,

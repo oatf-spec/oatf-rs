@@ -35,7 +35,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#,
@@ -56,7 +57,7 @@ fn stress_many_indicators() {
     let mut indicators = String::new();
     for i in 0..500 {
         indicators.push_str(&format!(
-            "    - surface: tool_description\n      pattern:\n        contains: \"test-{}\"\n",
+            "    - surface: tools/list\n      target: \"tools[*].description\"\n      pattern:\n        contains: \"test-{}\"\n",
             i
         ));
     }
@@ -116,7 +117,8 @@ attack:
     mode: mcp_server
     phases:
 {}  indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: t
 "#,
@@ -157,7 +159,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: Tool
 "#,
@@ -197,7 +200,8 @@ fn stress_regex_size_limit() {
          \x20         event: tools/call\n\
          \x20     - name: terminal\n\
          \x20 indicators:\n\
-         \x20   - surface: tool_description\n\
+         \x20   - surface: tools/list\n\
+         \x20     target: 'tools[*].description'\n\
          \x20     pattern:\n\
          \x20       regex: '{}'\n",
         huge_pattern

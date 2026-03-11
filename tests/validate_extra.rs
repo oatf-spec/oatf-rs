@@ -19,9 +19,10 @@ fn assert_has_error(input: &str, rule: &str) {
     let result = validate(&doc);
     assert!(
         result.errors.iter().any(|e| e.rule == rule),
-        "expected error {}, got: {:?}",
+        "expected error {}, got errors: {:?}, warnings: {:?}",
         rule,
-        result.errors
+        result.errors,
+        result.warnings
     );
 }
 
@@ -35,6 +36,19 @@ fn warnings_for(input: &str, code: &str) -> Vec<String> {
         .filter(|w| w.code == code)
         .map(|w| w.message.clone())
         .collect()
+}
+
+/// Helper: parse then validate, assert warning with specific code.
+fn assert_has_warning(input: &str, code: &str) {
+    let doc = parse(input).expect("parse should succeed");
+    let result = validate(&doc);
+    assert!(
+        result.warnings.iter().any(|w| w.code == code),
+        "expected warning {}, got warnings: {:?}, errors: {:?}",
+        code,
+        result.warnings,
+        result.errors
+    );
 }
 
 // ─── V-021: Wildcard dot-path syntax ────────────────────────────────────────
@@ -58,13 +72,13 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "{}"
       pattern:
         target: "{}"
         condition:
           contains: "test"
 "#,
-            target
+            target, target
         );
         let errs = errors_for(&input, "V-021");
         assert!(
@@ -86,7 +100,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[0].description"
       pattern:
         target: "tools[0].description"
         condition:
@@ -105,7 +119,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools..name"
       pattern:
         target: "tools..name"
         condition:
@@ -126,7 +140,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       semantic:
         intent: "exfiltrate data"
         threshold: 1.5
@@ -144,7 +158,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       semantic:
         intent: "exfiltrate data"
         threshold: 0.8
@@ -170,7 +184,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -195,7 +209,7 @@ attack:
       tools: []
   indicators:
     - id: OATF-001-01
-      surface: tool_description
+      target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -219,7 +233,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       confidence: 150
       pattern:
         contains: "test"
@@ -227,7 +241,7 @@ attack:
     assert_has_error(input, "V-025");
 }
 
-// ─── V-029: Event-mode validity ─────────────────────────────────────────────
+// ─── V-029: Event-mode validity (now warning) ───────────────────────────────
 
 #[test]
 fn v029_valid_event_for_mode() {
@@ -245,12 +259,16 @@ attack:
       - name: phase-2
         description: "Terminal phase."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    let errs = errors_for(input, "V-029");
-    assert!(errs.is_empty(), "valid event should not error: {:?}", errs);
+    let warnings = warnings_for(input, "V-029");
+    assert!(
+        warnings.is_empty(),
+        "valid event should not warn: {:?}",
+        warnings
+    );
 }
 
 // ─── V-030: Mutual exclusion (state/phases/actors) ──────────────────────────
@@ -269,7 +287,7 @@ attack:
         state:
           tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -302,17 +320,17 @@ attack:
                 url: "https://example.com"
                 skills: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
     assert_has_error(input, "V-031");
 }
 
-// ─── V-037: Version must be positive integer ────────────────────────────────
+// ─── V-035: Version must be positive integer (was V-037) ─────────────────────
 
 #[test]
-fn v037_zero_version() {
+fn v035_zero_version() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -322,15 +340,15 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-037");
+    assert_has_error(input, "V-035");
 }
 
 #[test]
-fn v037_negative_version() {
+fn v035_negative_version() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -340,17 +358,17 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-037");
+    assert_has_error(input, "V-035");
 }
 
-// ─── V-038: Trigger after duration format ───────────────────────────────────
+// ─── V-036: Trigger after duration format (was V-038) ────────────────────────
 
 #[test]
-fn v038_valid_duration() {
+fn v036_valid_duration() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -365,11 +383,11 @@ attack:
       - name: exploit
         description: "Terminal phase."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    let errs = errors_for(input, "V-038");
+    let errs = errors_for(input, "V-036");
     assert!(
         errs.is_empty(),
         "valid duration should not error: {:?}",
@@ -378,7 +396,7 @@ attack:
 }
 
 #[test]
-fn v038_invalid_duration() {
+fn v036_invalid_duration() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -393,17 +411,17 @@ attack:
       - name: exploit
         description: "Terminal phase."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-038");
+    assert_has_error(input, "V-036");
 }
 
-// ─── V-039: Extractor name pattern ──────────────────────────────────────────
+// ─── V-037: Extractor name pattern (was V-039) ──────────────────────────────
 
 #[test]
-fn v039_valid_extractor_name() {
+fn v037_valid_extractor_name() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -423,11 +441,11 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    let errs = errors_for(input, "V-039");
+    let errs = errors_for(input, "V-037");
     assert!(
         errs.is_empty(),
         "valid extractor name should not error: {:?}",
@@ -435,10 +453,10 @@ attack:
     );
 }
 
-// ─── V-040: Extractors non-empty ────────────────────────────────────────────
+// ─── V-038: Extractors non-empty (was V-040) ────────────────────────────────
 
 #[test]
-fn v040_empty_extractors_array() {
+fn v038_empty_extractors_array() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -454,17 +472,17 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-040");
+    assert_has_error(input, "V-038");
 }
 
-// ─── V-042: Trigger must have event or after ────────────────────────────────
+// ─── V-040: Trigger must have event or after (was V-042) ─────────────────────
 
 #[test]
-fn v042_trigger_with_only_count() {
+fn v040_trigger_with_only_count() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -479,17 +497,17 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-042");
+    assert_has_error(input, "V-040");
 }
 
-// ─── V-043: Binding-specific action keys ────────────────────────────────────
+// ─── V-041: Binding-specific action keys (was V-043) ─────────────────────────
 
 #[test]
-fn v043_valid_known_action() {
+fn v041_valid_known_action() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -508,11 +526,12 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    let errs = errors_for(input, "V-043");
+    // V-041 is enforced at parse time — no validation error expected
+    let errs = errors_for(input, "V-041");
     assert!(errs.is_empty(), "valid action should not error: {:?}", errs);
 }
 
@@ -529,11 +548,11 @@ attack:
       tools: []
   indicators:
     - id: dup-01
-      surface: tool_description
+      target: "tools[*].description"
       pattern:
         contains: "test"
     - id: dup-01
-      surface: tool_name
+      target: "tools[*].name"
       pattern:
         contains: "evil"
 "#;
@@ -552,7 +571,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
 "#;
     assert_has_error(input, "V-012");
 }
@@ -567,7 +586,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
       semantic:
@@ -588,7 +607,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         regex: "[unclosed"
 "#;
@@ -605,7 +624,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         regex: "(passwd|shadow|id_rsa)"
 "#;
@@ -624,7 +643,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       expression:
         cel: "message.content.contains("
 "#
@@ -674,7 +693,7 @@ attack:
     mode: mcp_server
     phases: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -700,7 +719,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -724,7 +743,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -752,7 +771,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -773,7 +792,7 @@ attack:
         - name: t1
           description: "use {{ghost.extractor}}"
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -792,7 +811,7 @@ attack:
         - name: t1
           description: "use {{missing_extractor}}"
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -803,10 +822,10 @@ attack:
     );
 }
 
-// ─── V-044: Regex extractor capture group ───────────────────────────────────
+// ─── V-042: Regex extractor capture group (was V-044) ────────────────────────
 
 #[test]
-fn v044_regex_with_literal_parenthesis_and_no_group_rejected() {
+fn v042_regex_with_literal_parenthesis_and_no_group_rejected() {
     let input = r#"
 oatf: "0.1"
 attack:
@@ -826,11 +845,11 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-044");
+    assert_has_error(input, "V-042");
 }
 
 // ─── Parse strictness: malformed pattern operator types ─────────────────────
@@ -845,7 +864,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: 123
 "#;
@@ -862,7 +881,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         condition:
           contains: 123
@@ -885,7 +904,7 @@ attack:
     state:
       tools: [] # docs mention <<: merge syntax here
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -905,7 +924,7 @@ attack:
     state:
       tools: [1] # &anchor text in comment
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -942,7 +961,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -974,7 +993,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -1004,7 +1023,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "##;
@@ -1040,7 +1059,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -1066,7 +1085,7 @@ attack:
         state:
           tools: []
         on_enter:
-          - send_notification:
+          - send:
               method: "notifications/tools/list_changed"
               typo: true
         trigger:
@@ -1074,7 +1093,7 @@ attack:
       - name: phase-2
         description: "Terminal."
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
@@ -1084,7 +1103,7 @@ attack:
     );
 }
 
-// ─── V-018: Custom protocol indicators skip surface validation ──────────────
+// ─── V-018: Surface validation is now warning-only ──────────────────────────
 
 #[test]
 fn v018_custom_protocol_skips_surface_validation() {
@@ -1098,22 +1117,23 @@ attack:
       tools: []
   indicators:
     - surface: custom_surface
+      target: "some.path"
       protocol: custom_proto
       pattern:
-        target: "$.some.path"
+        target: "some.path"
         contains: "test"
 "#;
-    let errs = errors_for(input, "V-018");
+    let warnings = warnings_for(input, "V-018");
     assert!(
-        errs.is_empty(),
-        "custom protocol indicators must not produce V-018 errors, got: {:?}",
-        errs
+        warnings.is_empty(),
+        "custom protocol indicators must not produce V-018 warnings, got: {:?}",
+        warnings
     );
 }
 
 #[test]
-fn v018_known_protocol_still_rejects_unknown_surface() {
-    // Known mode (mcp_server) + unknown surface → still V-018 error
+fn v018_known_protocol_warns_on_unknown_surface() {
+    // Known mode (mcp_server) + unknown surface → V-018 warning
     let input = r#"
 oatf: "0.1"
 attack:
@@ -1123,10 +1143,11 @@ attack:
       tools: []
   indicators:
     - surface: bogus_surface
+      target: "tools[*].description"
       pattern:
         contains: "test"
 "#;
-    assert_has_error(input, "V-018");
+    assert_has_warning(input, "V-018");
 }
 
 // ─── Non-object state values must be rejected ───────────────────────────────
@@ -1173,7 +1194,7 @@ attack:
     state:
       tools: []
   indicators:
-    - surface: tool_description
+    - target: "tools[*].description"
       pattern:
         contains: "test"
 "#;

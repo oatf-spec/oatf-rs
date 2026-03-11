@@ -30,7 +30,8 @@
 //!           event: tools/call
 //!       - name: terminal
 //!   indicators:
-//!     - surface: tool_description
+//!     - surface: tools/list
+//!       target: "tools[*].description"
 //!       pattern:
 //!         contains: malicious
 //! "#;
@@ -123,7 +124,8 @@ pub struct LoadResult {
 ///           event: tools/call
 ///       - name: terminal
 ///   indicators:
-///     - surface: tool_description
+///     - surface: tools/list
+///       target: "tools[*].description"
 ///       pattern:
 ///         contains: test
 /// "#;

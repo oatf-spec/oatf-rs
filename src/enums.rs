@@ -192,3 +192,25 @@ pub enum AdvanceReason {
     /// The trigger's timeout elapsed.
     Timeout,
 }
+
+/// Direction of a protocol message for indicator matching.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    /// Match against the protocol request.
+    Request,
+    /// Match against the protocol response.
+    Response,
+}
+
+/// Detection method an indicator uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndicatorMethod {
+    /// Pattern-based detection.
+    Pattern,
+    /// CEL expression-based detection.
+    Expression,
+    /// Semantic/intent-based detection.
+    Semantic,
+}

@@ -28,11 +28,11 @@ fn arb_severity() -> impl Strategy<Value = String> {
 /// Strategy for valid surface names.
 fn arb_surface() -> impl Strategy<Value = String> {
     prop_oneof![
-        Just("tool_description"),
-        Just("tool_output"),
-        Just("tool_input"),
-        Just("prompt_text"),
-        Just("resource_content"),
+        Just("tools/list"),
+        Just("tools/call"),
+        Just("resources/read"),
+        Just("prompts/list"),
+        Just("message/send"),
     ]
     .prop_map(|s| s.to_string())
 }
@@ -118,6 +118,7 @@ attack:
       - name: terminal
   indicators:
     - surface: {surface}
+      target: "tools[*].description"
       pattern:
         contains: malicious"#,
     )

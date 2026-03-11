@@ -628,65 +628,6 @@ fn compute_effective_state_suite() {
     assert_eq!(failed, 0, "{} compute_effective_state tests failed", failed);
 }
 
-// --- resolve_event_qualifier -------------------------------------------------
-
-#[derive(Debug, serde::Deserialize)]
-struct QualifierCase {
-    name: String,
-    id: String,
-    input: QualifierInput,
-    expected: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct QualifierInput {
-    protocol: String,
-    base_event: String,
-    content: Value,
-}
-
-#[test]
-fn resolve_event_qualifier_suite() {
-    let path = conformance_dir().join("primitives/resolve-event-qualifier.yaml");
-    assert!(
-        path.exists(),
-        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
-        path
-    );
-
-    let content = std::fs::read_to_string(&path).unwrap();
-    let cases: Vec<QualifierCase> = serde_saphyr::from_str(&content).unwrap();
-
-    let mut passed = 0;
-    let mut failed = 0;
-
-    for case in &cases {
-        let result = primitives::resolve_event_qualifier(
-            &case.input.protocol,
-            &case.input.base_event,
-            &case.input.content,
-        );
-
-        if result == case.expected {
-            passed += 1;
-        } else {
-            eprintln!(
-                "  FAIL [{}] {}: expected {:?}, got {:?}",
-                case.id, case.name, case.expected, result
-            );
-            failed += 1;
-        }
-    }
-
-    eprintln!(
-        "\nresolve_event_qualifier: {} passed, {} failed out of {} total",
-        passed,
-        failed,
-        cases.len()
-    );
-    assert_eq!(failed, 0, "{} resolve_event_qualifier tests failed", failed);
-}
-
 // --- evaluate_trigger --------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
@@ -703,7 +644,8 @@ struct TriggerInput {
     event: Option<TriggerEventDef>,
     elapsed: String,
     state: TriggerStateDef,
-    protocol: String,
+    #[serde(default)]
+    protocol: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -721,8 +663,6 @@ struct TriggerDef {
 #[derive(Debug, serde::Deserialize)]
 struct TriggerEventDef {
     event_type: String,
-    #[serde(default)]
-    qualifier: Option<String>,
     content: Value,
 }
 
@@ -769,7 +709,7 @@ fn evaluate_trigger_suite() {
 
         let event = case.input.event.as_ref().map(|e| ProtocolEvent {
             event_type: e.event_type.clone(),
-            qualifier: e.qualifier.clone(),
+            qualifier: None,
             content: e.content.clone(),
         });
 
@@ -783,7 +723,7 @@ fn evaluate_trigger_suite() {
             event.as_ref(),
             elapsed,
             &mut state,
-            &case.input.protocol,
+            case.input.protocol.as_deref().unwrap_or(""),
         );
 
         let (result_str, reason_str) = match &result {
@@ -947,71 +887,6 @@ fn extract_protocol_suite() {
         cases.len()
     );
     assert_eq!(failed, 0, "{} extract_protocol tests failed", failed);
-}
-
-// --- parse_event_qualifier ---------------------------------------------------
-
-#[derive(Debug, serde::Deserialize)]
-struct ParseEventQualifierCase {
-    name: String,
-    id: String,
-    input: ParseEventQualifierInput,
-    expected: ParseEventQualifierExpected,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct ParseEventQualifierInput {
-    event_string: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct ParseEventQualifierExpected {
-    base: String,
-    qualifier: Option<String>,
-}
-
-#[test]
-fn parse_event_qualifier_suite() {
-    let path = conformance_dir().join("primitives/parse-event-qualifier.yaml");
-    assert!(
-        path.exists(),
-        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
-        path
-    );
-
-    let content = std::fs::read_to_string(&path).unwrap();
-    let cases: Vec<ParseEventQualifierCase> = serde_saphyr::from_str(&content).unwrap();
-
-    let mut passed = 0;
-    let mut failed = 0;
-
-    for case in &cases {
-        let (base, qualifier) = primitives::parse_event_qualifier(&case.input.event_string);
-
-        let base_ok = base == case.expected.base;
-        let qualifier_ok = match &case.expected.qualifier {
-            Some(q) => qualifier == Some(q.as_str()),
-            None => qualifier.is_none(),
-        };
-
-        if base_ok && qualifier_ok {
-            passed += 1;
-        } else {
-            eprintln!(
-                "  FAIL [{}] {}: expected base={:?} qualifier={:?}, got base={:?} qualifier={:?}",
-                case.id, case.name, case.expected.base, case.expected.qualifier, base, qualifier
-            );
-            failed += 1;
-        }
-    }
-
-    eprintln!(
-        "\nparse_event_qualifier: {} passed, {} failed out of {} total",
-        passed,
-        failed,
-        cases.len()
-    );
-    assert_eq!(failed, 0, "{} parse_event_qualifier tests failed", failed);
 }
 
 // --- select_response ---------------------------------------------------------
