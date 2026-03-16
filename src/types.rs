@@ -466,12 +466,9 @@ pub struct Trigger {
 /// A protocol event observed during execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtocolEvent {
-    /// Qualified event type (e.g., `"mcp:tool_call"`).
+    /// The event type (e.g., `"tools/call"`, `"message/send"`, `"run_started"`).
     pub event_type: String,
-    /// Optional event qualifier (e.g., method name).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qualifier: Option<String>,
-    /// Event payload content.
+    /// The event payload. Evaluated against `trigger.match` predicates via `evaluate_predicate`.
     pub content: Value,
 }
 
@@ -495,8 +492,8 @@ pub enum TriggerResult {
 ///
 /// The caller should create one `TriggerState` per trigger and pass it by
 /// mutable reference on every evaluation. The SDK increments `event_count`
-/// only when the incoming event fully matches (base type + qualifier +
-/// predicate), which prevents the over-count bug inherent in external counting.
+/// only when the incoming event fully matches (base event type + predicate),
+/// which prevents the over-count bug inherent in external counting.
 #[derive(Clone, Debug, Default)]
 pub struct TriggerState {
     /// Number of events that have fully matched so far.
@@ -1021,10 +1018,12 @@ pub struct EvaluationSummary {
 // ─── §2.23 SynthesizeBlock ──────────────────────────────────────────────────
 
 /// An LLM synthesis block for generating adversarial content.
+/// Reserved for a future version; no normative semantics in v0.1.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizeBlock {
     /// Prompt template for the generation provider.
-    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 // ─── §2.24 ResponseEntry ────────────────────────────────────────────────────

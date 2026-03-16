@@ -14,7 +14,6 @@ fn evaluate_trigger_clamps_negative_count_to_one() {
     };
     let event = ProtocolEvent {
         event_type: "tools/call".to_string(),
-        qualifier: None,
         content: json!({}),
     };
     let mut state = TriggerState::default();
@@ -24,7 +23,6 @@ fn evaluate_trigger_clamps_negative_count_to_one() {
         Some(&event),
         Duration::from_secs(0),
         &mut state,
-        "mcp",
     );
 
     match result {
@@ -44,7 +42,6 @@ fn evaluate_trigger_clamps_zero_count_to_one() {
     };
     let event = ProtocolEvent {
         event_type: "tools/call".to_string(),
-        qualifier: None,
         content: json!({}),
     };
     let mut state = TriggerState::default();
@@ -54,7 +51,6 @@ fn evaluate_trigger_clamps_zero_count_to_one() {
         Some(&event),
         Duration::from_secs(0),
         &mut state,
-        "mcp",
     );
 
     match result {

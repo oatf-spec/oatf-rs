@@ -709,7 +709,6 @@ fn evaluate_trigger_suite() {
 
         let event = case.input.event.as_ref().map(|e| ProtocolEvent {
             event_type: e.event_type.clone(),
-            qualifier: None,
             content: e.content.clone(),
         });
 
@@ -723,7 +722,6 @@ fn evaluate_trigger_suite() {
             event.as_ref(),
             elapsed,
             &mut state,
-            case.input.protocol.as_deref().unwrap_or(""),
         );
 
         let (result_str, reason_str) = match &result {

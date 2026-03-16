@@ -18,7 +18,7 @@ pub(crate) fn compile_user_regex(pattern: &str) -> Result<Regex, regex::Error> {
         .build()
 }
 
-// Re-export extract_protocol from event_registry (§5.10)
+// Re-export extract_protocol from event_registry (§5.9)
 pub use crate::event_registry::extract_protocol;
 
 // ─── §5.1.1 resolve_simple_path ─────────────────────────────────────────────
@@ -892,7 +892,6 @@ pub fn evaluate_trigger(
     event: Option<&ProtocolEvent>,
     elapsed: Duration,
     state: &mut TriggerState,
-    _protocol: &str,
 ) -> TriggerResult {
     // 1. Check timeout
     if let Some(after) = &trigger.after
@@ -931,7 +930,7 @@ pub fn evaluate_trigger(
     TriggerResult::NotAdvanced
 }
 
-// ─── §5.11 compute_effective_state ──────────────────────────────────────────
+// ─── §5.10 compute_effective_state ──────────────────────────────────────────
 
 /// Computes the effective state at a given phase by applying state inheritance.
 ///

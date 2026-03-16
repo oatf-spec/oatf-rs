@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **evaluate_trigger** — removed `protocol` parameter to match SDK spec §5.8 signature.
+- **ProtocolEvent** — removed `qualifier` field to match SDK spec §2.8a (two fields: `event_type`, `content`).
+- **SynthesizeBlock** — `prompt` is now `Option<String>` to match SDK spec §2.23 (`Required: No`).
+
+### Fixed
+
+- Section number references in primitives.rs comments (`§5.10` → `§5.9` for `extract_protocol`, `§5.11` → `§5.10` for `compute_effective_state`).
+
 ## [0.2.0] - 2026-02-26
 
 ### Changed

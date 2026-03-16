@@ -280,6 +280,11 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         event: "custom",
         valid_modes: &["ag_ui_client"],
     },
+    // Synthetic event for AG-UI initial request submission (§7.3.2)
+    EventModeEntry {
+        event: "run_agent_input",
+        valid_modes: &["ag_ui_client"],
+    },
 ];
 
 /// Look up an event entry by name.
