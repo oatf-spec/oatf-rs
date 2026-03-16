@@ -1,8 +1,10 @@
 //! OATF document types per the format specification §2.
 //!
 //! All struct fields follow the specification naming. Extension fields (`x-*` prefixed)
-//! are captured via `#[serde(flatten)] HashMap<String, Value>` on types that support them.
+//! are captured via `#[serde(flatten)] IndexMap<String, Value>` on types that support them,
+//! preserving insertion order so that `serialize` can emit them in their original position.
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -80,7 +82,7 @@ pub struct Attack {
     pub correlation: Option<Correlation>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.3a Correlation ───────────────────────────────────────────────────────
@@ -200,7 +202,7 @@ pub struct Execution {
     pub actors: Option<Vec<Actor>>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.6a Actor ─────────────────────────────────────────────────────────────
@@ -216,7 +218,7 @@ pub struct Actor {
     pub phases: Vec<Phase>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.7 Phase ──────────────────────────────────────────────────────────────
@@ -247,7 +249,7 @@ pub struct Phase {
     pub trigger: Option<Trigger>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.7a Action ────────────────────────────────────────────────────────────
@@ -256,16 +258,14 @@ pub struct Phase {
 /// Tagged union with known variants + catch-all for binding-specific actions.
 #[derive(Clone, Debug)]
 pub enum Action {
-    /// Send a protocol notification message.
-    SendNotification {
-        /// Notification method name.
+    /// Send a protocol message.
+    Send {
+        /// Method name.
         method: String,
-        /// Optional notification parameters.
+        /// Optional parameters.
         params: Option<Value>,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
+        extensions: IndexMap<String, Value>,
     },
     /// Emit a log message.
     Log {
@@ -274,25 +274,7 @@ pub enum Action {
         /// Log level (defaults to `info`).
         level: Option<LogLevel>,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
-    },
-    /// Send a user elicitation request.
-    SendElicitation {
-        /// Elicitation message text.
-        message: String,
-        /// Elicitation mode (`form` or `url`).
-        mode: Option<ElicitationMode>,
-        /// JSON Schema for form-mode elicitation.
-        #[allow(non_snake_case)]
-        requested_schema: Option<Value>,
-        /// URL for url-mode elicitation.
-        url: Option<String>,
-        /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
+        extensions: IndexMap<String, Value>,
     },
     /// Binding-specific action with a single unknown key.
     BindingSpecific {
@@ -301,9 +283,7 @@ pub enum Action {
         /// The action value.
         value: Value,
         /// Extension fields (`x-*` prefixed).
-        extensions: HashMap<String, Value>,
-        /// Number of non-extension keys in the original object (for V-043).
-        non_ext_key_count: usize,
+        extensions: IndexMap<String, Value>,
     },
 }
 
@@ -311,7 +291,7 @@ impl Serialize for Action {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
-            Action::SendNotification {
+            Action::Send {
                 method,
                 params,
                 extensions,
@@ -323,7 +303,7 @@ impl Serialize for Action {
                 if let Some(p) = params {
                     inner.insert("params".to_string(), p.clone());
                 }
-                outer.serialize_entry("send_notification", &Value::Object(inner))?;
+                outer.serialize_entry("send", &Value::Object(inner))?;
                 for (k, v) in extensions {
                     outer.serialize_entry(k, v)?;
                 }
@@ -350,35 +330,6 @@ impl Serialize for Action {
                 }
                 outer.end()
             }
-            Action::SendElicitation {
-                message,
-                mode,
-                requested_schema,
-                url,
-                extensions,
-                ..
-            } => {
-                let mut outer = serializer.serialize_map(None)?;
-                let mut inner = serde_json::Map::new();
-                inner.insert("message".to_string(), Value::String(message.clone()));
-                if let Some(m) = mode {
-                    inner.insert(
-                        "mode".to_string(),
-                        serde_json::to_value(m).unwrap_or(Value::Null),
-                    );
-                }
-                if let Some(rs) = requested_schema {
-                    inner.insert("requestedSchema".to_string(), rs.clone());
-                }
-                if let Some(u) = url {
-                    inner.insert("url".to_string(), Value::String(u.clone()));
-                }
-                outer.serialize_entry("send_elicitation", &Value::Object(inner))?;
-                for (k, v) in extensions {
-                    outer.serialize_entry(k, v)?;
-                }
-                outer.end()
-            }
             Action::BindingSpecific {
                 key,
                 value,
@@ -400,7 +351,7 @@ impl<'de> Deserialize<'de> for Action {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let map: serde_json::Map<String, Value> = serde_json::Map::deserialize(deserializer)?;
 
-        let mut extensions = HashMap::new();
+        let mut extensions = IndexMap::new();
         let mut action_key = None;
         let mut action_value = None;
         let mut non_ext_key_count = 0usize;
@@ -417,32 +368,55 @@ impl<'de> Deserialize<'de> for Action {
             }
         }
 
+        if non_ext_key_count != 1 {
+            return Err(serde::de::Error::custom(format!(
+                "action must have exactly 1 non-extension key, found {}",
+                non_ext_key_count
+            )));
+        }
+
         let key = action_key
             .ok_or_else(|| serde::de::Error::custom("action object must have at least one key"))?;
-        let value = action_value.unwrap();
+        let value = action_value
+            .ok_or_else(|| serde::de::Error::custom("action object must have a value"))?;
 
         match key.as_str() {
-            "send_notification" => {
-                let obj = value.as_object().ok_or_else(|| {
-                    serde::de::Error::custom("send_notification must be an object")
-                })?;
+            "send" => {
+                let obj = value
+                    .as_object()
+                    .ok_or_else(|| serde::de::Error::custom("send must be an object"))?;
+                for field in obj.keys() {
+                    if field != "method" && field != "params" {
+                        return Err(serde::de::Error::custom(format!(
+                            "send has unknown field '{}'",
+                            field
+                        )));
+                    }
+                }
                 let method = obj
                     .get("method")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| serde::de::Error::custom("send_notification requires 'method'"))?
+                    .ok_or_else(|| serde::de::Error::custom("send requires 'method'"))?
                     .to_string();
                 let params = obj.get("params").cloned();
-                Ok(Action::SendNotification {
+                Ok(Action::Send {
                     method,
                     params,
                     extensions,
-                    non_ext_key_count,
                 })
             }
             "log" => {
                 let obj = value
                     .as_object()
                     .ok_or_else(|| serde::de::Error::custom("log must be an object"))?;
+                for field in obj.keys() {
+                    if field != "message" && field != "level" {
+                        return Err(serde::de::Error::custom(format!(
+                            "log has unknown field '{}'",
+                            field
+                        )));
+                    }
+                }
                 let message = obj
                     .get("message")
                     .and_then(|v| v.as_str())
@@ -457,42 +431,12 @@ impl<'de> Deserialize<'de> for Action {
                     message,
                     level,
                     extensions,
-                    non_ext_key_count,
-                })
-            }
-            "send_elicitation" => {
-                let obj = value.as_object().ok_or_else(|| {
-                    serde::de::Error::custom("send_elicitation must be an object")
-                })?;
-                let message = obj
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| serde::de::Error::custom("send_elicitation requires 'message'"))?
-                    .to_string();
-                let mode = obj
-                    .get("mode")
-                    .map(|v| serde_json::from_value(v.clone()))
-                    .transpose()
-                    .map_err(serde::de::Error::custom)?;
-                let requested_schema = obj.get("requestedSchema").cloned();
-                let url = obj
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                Ok(Action::SendElicitation {
-                    message,
-                    mode,
-                    requested_schema,
-                    url,
-                    extensions,
-                    non_ext_key_count,
                 })
             }
             _ => Ok(Action::BindingSpecific {
                 key,
                 value,
                 extensions,
-                non_ext_key_count,
             }),
         }
     }
@@ -522,12 +466,9 @@ pub struct Trigger {
 /// A protocol event observed during execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtocolEvent {
-    /// Qualified event type (e.g., `"mcp:tool_call"`).
+    /// The event type (e.g., `"tools/call"`, `"message/send"`, `"run_started"`).
     pub event_type: String,
-    /// Optional event qualifier (e.g., method name).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qualifier: Option<String>,
-    /// Event payload content.
+    /// The event payload. Evaluated against `trigger.match` predicates via `evaluate_predicate`.
     pub content: Value,
 }
 
@@ -551,8 +492,8 @@ pub enum TriggerResult {
 ///
 /// The caller should create one `TriggerState` per trigger and pass it by
 /// mutable reference on every evaluation. The SDK increments `event_count`
-/// only when the incoming event fully matches (base type + qualifier +
-/// predicate), which prevents the over-count bug inherent in external counting.
+/// only when the incoming event fully matches (base event type + predicate),
+/// which prevents the over-count bug inherent in external counting.
 #[derive(Clone, Debug, Default)]
 pub struct TriggerState {
     /// Number of events that have fully matched so far.
@@ -604,19 +545,10 @@ impl<'de> Deserialize<'de> for MatchEntry {
         match &value {
             Value::Object(map) => {
                 // Check if it looks like a MatchCondition (has operator keys)
-                let operator_keys = [
-                    "contains",
-                    "starts_with",
-                    "ends_with",
-                    "regex",
-                    "any_of",
-                    "gt",
-                    "lt",
-                    "gte",
-                    "lte",
-                    "exists",
-                ];
-                if map.keys().any(|k| operator_keys.contains(&k.as_str())) {
+                if map
+                    .keys()
+                    .any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
+                {
                     let cond: MatchCondition =
                         serde_json::from_value(value).map_err(serde::de::Error::custom)?;
                     Ok(MatchEntry::Condition(cond))
@@ -631,8 +563,27 @@ impl<'de> Deserialize<'de> for MatchEntry {
 
 // ─── §2.11 MatchCondition ───────────────────────────────────────────────────
 
+/// The set of recognized match-condition operator key names.
+///
+/// Used to distinguish a MatchCondition object from a bare-value equality
+/// check during deserialization of `MatchEntry`, `Condition`, and
+/// `PatternMatch.condition`.
+pub static MATCH_OPERATOR_KEYS: &[&str] = &[
+    "contains",
+    "starts_with",
+    "ends_with",
+    "regex",
+    "any_of",
+    "gt",
+    "lt",
+    "gte",
+    "lte",
+    "exists",
+];
+
 /// Operator-based match condition for field comparison.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MatchCondition {
     /// String containment check.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -679,8 +630,20 @@ pub struct Indicator {
     /// Protocol this indicator applies to (e.g., `"mcp"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
-    /// Attack surface name (e.g., `"mcp:tool_call"`).
-    pub surface: String,
+    /// Protocol operation name (e.g., `"tools/call"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    /// Target path within the protocol message.
+    pub target: String,
+    /// Actor name this indicator is scoped to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// Message direction filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Direction>,
+    /// Detection method hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<IndicatorMethod>,
     /// Human-readable indicator description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -704,7 +667,7 @@ pub struct Indicator {
     pub false_positives: Option<Vec<String>>,
     /// Extension fields (`x-*` prefixed).
     #[serde(flatten)]
-    pub extensions: HashMap<String, Value>,
+    pub extensions: IndexMap<String, Value>,
 }
 
 // ─── §2.13 PatternMatch ─────────────────────────────────────────────────────
@@ -808,37 +771,61 @@ impl<'de> Deserialize<'de> for PatternMatch {
             .as_object()
             .ok_or_else(|| serde::de::Error::custom("pattern must be an object"))?;
 
-        let target = map
-            .get("target")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let condition = map.get("condition").map(|v| {
-            // Condition can be a bare value or a MatchCondition object
-            Condition::from_value(v.clone())
-        });
+        let parse_opt_string = |key: &str| -> Result<Option<String>, D::Error> {
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.clone())),
+                Some(v) => Err(serde::de::Error::custom(format!(
+                    "pattern.{} must be a string, got {}",
+                    key, v
+                ))),
+            }
+        };
+
+        let parse_opt_number = |key: &str| -> Result<Option<f64>, D::Error> {
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v.as_f64().map(Some).ok_or_else(|| {
+                    serde::de::Error::custom(format!("pattern.{} must be a number, got {}", key, v))
+                }),
+            }
+        };
+
+        let target = match map.get("target") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(v) => {
+                return Err(serde::de::Error::custom(format!(
+                    "pattern.target must be a string, got {}",
+                    v
+                )));
+            }
+        };
+
+        let condition = match map.get("condition") {
+            Some(v) => Some(Condition::from_value(v.clone()).map_err(serde::de::Error::custom)?),
+            None => None,
+        };
 
         // Shorthand operator fields
-        let contains = map
-            .get("contains")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let starts_with = map
-            .get("starts_with")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let ends_with = map
-            .get("ends_with")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let regex = map
-            .get("regex")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let any_of = map.get("any_of").and_then(|v| v.as_array()).cloned();
-        let gt = map.get("gt").and_then(|v| v.as_f64());
-        let lt = map.get("lt").and_then(|v| v.as_f64());
-        let gte = map.get("gte").and_then(|v| v.as_f64());
-        let lte = map.get("lte").and_then(|v| v.as_f64());
+        let contains = parse_opt_string("contains")?;
+        let starts_with = parse_opt_string("starts_with")?;
+        let ends_with = parse_opt_string("ends_with")?;
+        let regex = parse_opt_string("regex")?;
+        let any_of = match map.get("any_of") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(arr)) => Some(arr.clone()),
+            Some(v) => {
+                return Err(serde::de::Error::custom(format!(
+                    "pattern.any_of must be an array, got {}",
+                    v
+                )));
+            }
+        };
+        let gt = parse_opt_number("gt")?;
+        let lt = parse_opt_number("lt")?;
+        let gte = parse_opt_number("gte")?;
+        let lte = parse_opt_number("lte")?;
 
         Ok(PatternMatch {
             target,
@@ -866,29 +853,21 @@ pub enum Condition {
 }
 
 impl Condition {
-    pub fn from_value(v: Value) -> Self {
+    pub fn from_value(v: Value) -> Result<Self, String> {
         match &v {
             Value::Object(map) => {
-                let operator_keys = [
-                    "contains",
-                    "starts_with",
-                    "ends_with",
-                    "regex",
-                    "any_of",
-                    "gt",
-                    "lt",
-                    "gte",
-                    "lte",
-                    "exists",
-                ];
-                if map.keys().any(|k| operator_keys.contains(&k.as_str()))
-                    && let Ok(cond) = serde_json::from_value::<MatchCondition>(v.clone())
+                if map
+                    .keys()
+                    .any(|k| MATCH_OPERATOR_KEYS.contains(&k.as_str()))
                 {
-                    return Condition::Operators(cond);
+                    let cond: MatchCondition = serde_json::from_value(v)
+                        .map_err(|e| format!("invalid pattern.condition object: {}", e))?;
+                    Ok(Condition::Operators(cond))
+                } else {
+                    Ok(Condition::Equality(v))
                 }
-                Condition::Equality(v)
             }
-            _ => Condition::Equality(v),
+            _ => Ok(Condition::Equality(v)),
         }
     }
 }
@@ -1039,10 +1018,12 @@ pub struct EvaluationSummary {
 // ─── §2.23 SynthesizeBlock ──────────────────────────────────────────────────
 
 /// An LLM synthesis block for generating adversarial content.
+/// Reserved for a future version; no normative semantics in v0.1.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizeBlock {
     /// Prompt template for the generation provider.
-    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 // ─── §2.24 ResponseEntry ────────────────────────────────────────────────────
@@ -1058,5 +1039,5 @@ pub struct ResponseEntry {
     pub synthesize: Option<SynthesizeBlock>,
     /// Protocol-specific static content fields (MCP content, A2A messages, etc.).
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub extra: IndexMap<String, Value>,
 }

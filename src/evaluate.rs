@@ -70,6 +70,12 @@ pub trait GenerationProvider {
 /// Limitations: The `cel` crate (cel-rust) does not support the `matches`
 /// function from the CEL standard without the `regex` feature. The crate's
 /// regex support may differ from RE2 semantics in edge cases.
+///
+/// # Resource Limits
+///
+/// This evaluator does **not** impose execution time or memory limits.
+/// Callers processing untrusted OATF documents should wrap evaluation
+/// in a timeout or provide a custom [`CelEvaluator`] with resource controls.
 #[cfg(feature = "cel-eval")]
 pub struct DefaultCelEvaluator;
 
@@ -99,14 +105,16 @@ impl CelEvaluator for DefaultCelEvaluator {
 
         match program.execute(&cel_ctx) {
             Ok(result) => Ok(cel_to_json(&result)),
-            Err(cel::ExecutionError::NoSuchKey(_)) => {
-                // Missing fields produce not_matched per §4.1
-                Ok(Value::Bool(false))
-            }
-            Err(cel::ExecutionError::UndeclaredReference(_)) => {
-                // Undeclared references treated as missing → not_matched
-                Ok(Value::Bool(false))
-            }
+            Err(cel::ExecutionError::NoSuchKey(ref key)) => Err(EvaluationError {
+                kind: EvaluationErrorKind::CelError,
+                message: format!("CEL missing field: {}", key),
+                indicator_id: None,
+            }),
+            Err(cel::ExecutionError::UndeclaredReference(ref name)) => Err(EvaluationError {
+                kind: EvaluationErrorKind::CelError,
+                message: format!("CEL undeclared reference: {}", name),
+                indicator_id: None,
+            }),
             Err(ref e @ cel::ExecutionError::NotSupportedAsMethod { .. }) => Err(EvaluationError {
                 kind: EvaluationErrorKind::UnsupportedMethod,
                 message: format!("CEL unsupported method: {}", e),
@@ -121,11 +129,21 @@ impl CelEvaluator for DefaultCelEvaluator {
     }
 }
 
+const MAX_VALUE_DEPTH: usize = 128;
+
 /// Convert serde_json::Value → cel::Value.
 #[cfg(feature = "cel-eval")]
 fn json_to_cel(value: &Value) -> cel::Value {
+    json_to_cel_inner(value, 0)
+}
+
+#[cfg(feature = "cel-eval")]
+fn json_to_cel_inner(value: &Value, depth: usize) -> cel::Value {
     use std::sync::Arc;
 
+    if depth > MAX_VALUE_DEPTH {
+        return cel::Value::Null;
+    }
     match value {
         Value::Null => cel::Value::Null,
         Value::Bool(b) => cel::Value::Bool(*b),
@@ -142,13 +160,16 @@ fn json_to_cel(value: &Value) -> cel::Value {
         }
         Value::String(s) => cel::Value::String(Arc::new(s.clone())),
         Value::Array(arr) => {
-            let items: Vec<cel::Value> = arr.iter().map(json_to_cel).collect();
+            let items: Vec<cel::Value> = arr
+                .iter()
+                .map(|v| json_to_cel_inner(v, depth + 1))
+                .collect();
             cel::Value::List(Arc::new(items))
         }
         Value::Object(map) => {
             let entries: HashMap<String, cel::Value> = map
                 .iter()
-                .map(|(k, v)| (k.clone(), json_to_cel(v)))
+                .map(|(k, v)| (k.clone(), json_to_cel_inner(v, depth + 1)))
                 .collect();
             entries.into()
         }
@@ -158,6 +179,14 @@ fn json_to_cel(value: &Value) -> cel::Value {
 /// Convert cel::Value → serde_json::Value.
 #[cfg(feature = "cel-eval")]
 fn cel_to_json(value: &cel::Value) -> Value {
+    cel_to_json_inner(value, 0)
+}
+
+#[cfg(feature = "cel-eval")]
+fn cel_to_json_inner(value: &cel::Value, depth: usize) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return Value::Null;
+    }
     match value {
         cel::Value::Null => Value::Null,
         cel::Value::Bool(b) => Value::Bool(*b),
@@ -167,7 +196,9 @@ fn cel_to_json(value: &cel::Value) -> Value {
             .map(Value::Number)
             .unwrap_or(Value::Null),
         cel::Value::String(s) => Value::String(s.to_string()),
-        cel::Value::List(l) => Value::Array(l.iter().map(cel_to_json).collect()),
+        cel::Value::List(l) => {
+            Value::Array(l.iter().map(|v| cel_to_json_inner(v, depth + 1)).collect())
+        }
         cel::Value::Map(m) => {
             let mut obj = serde_json::Map::new();
             for (key, val) in m.map.iter() {
@@ -177,12 +208,71 @@ fn cel_to_json(value: &cel::Value) -> Value {
                     cel::objects::Key::Uint(u) => u.to_string(),
                     cel::objects::Key::Bool(b) => b.to_string(),
                 };
-                obj.insert(k, cel_to_json(val));
+                obj.insert(k, cel_to_json_inner(val, depth + 1));
             }
             Value::Object(obj)
         }
         // Bytes, Duration, Timestamp, Function, Opaque → null
         _ => Value::Null,
+    }
+}
+
+/// Returns the current time as an ISO 8601 / RFC 3339 UTC string.
+fn now_iso8601() -> String {
+    use std::time::SystemTime;
+    let duration = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = duration.as_secs();
+
+    // Decompose into date/time components (UTC)
+    let days = secs / 86400;
+    let time_secs = secs % 86400;
+    let hours = time_secs / 3600;
+    let minutes = (time_secs % 3600) / 60;
+    let seconds = time_secs % 60;
+
+    // Civil date from day count (algorithm from Howard Hinnant)
+    let z = days as i64 + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y, m, d, hours, minutes, seconds
+    )
+}
+
+fn make_verdict(id: String, result: IndicatorResult, evidence: Option<String>) -> IndicatorVerdict {
+    IndicatorVerdict {
+        indicator_id: id,
+        result,
+        timestamp: Some(now_iso8601()),
+        evidence,
+        source: None,
+    }
+}
+
+fn build_attack_verdict(
+    attack_id: Option<String>,
+    result: AttackResult,
+    indicator_verdicts: Vec<IndicatorVerdict>,
+    evaluation_summary: EvaluationSummary,
+) -> AttackVerdict {
+    AttackVerdict {
+        attack_id,
+        result,
+        indicator_verdicts,
+        evaluation_summary,
+        timestamp: Some(now_iso8601()),
+        source: None,
     }
 }
 
@@ -195,6 +285,9 @@ fn cel_to_json(value: &cel::Value) -> Value {
 ///
 /// Returns `Ok(true)` if any resolved value matches the condition.
 /// Returns `Ok(false)` if no values match or if the target resolves to nothing.
+///
+/// The `exists` operator is handled at the pattern level (not by `evaluate_condition`,
+/// per §5.3), mirroring the path-resolution semantics of `evaluate_predicate` (§5.4).
 pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool, EvaluationError> {
     let target = pattern.target.as_deref().unwrap_or("");
     let condition = match &pattern.condition {
@@ -203,6 +296,28 @@ pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool,
     };
 
     let resolved = resolve_wildcard_path(target, message);
+
+    // Handle `exists` at the pattern level. Per §5.3, `exists` is evaluated
+    // during path resolution, not by `evaluate_condition`.
+    if let Condition::Operators(cond) = condition
+        && cond.exists == Some(false)
+    {
+        // exists: false + other operators → always false (AND with false)
+        let has_other_ops = cond.contains.is_some()
+            || cond.starts_with.is_some()
+            || cond.ends_with.is_some()
+            || cond.regex.is_some()
+            || cond.any_of.is_some()
+            || cond.gt.is_some()
+            || cond.lt.is_some()
+            || cond.gte.is_some()
+            || cond.lte.is_some();
+        if has_other_ops {
+            return Ok(false);
+        }
+        return Ok(resolved.is_empty());
+    }
+
     if resolved.is_empty() {
         return Ok(false);
     }
@@ -223,17 +338,26 @@ pub fn evaluate_pattern(pattern: &PatternMatch, message: &Value) -> Result<bool,
 /// Builds the CEL context by binding `message` and any declared variables,
 /// then delegates to the provided `CelEvaluator`.
 ///
+/// When `cel_evaluator` is `None`, returns `Err(EvaluationError)` indicating
+/// that CEL evaluation is not available.
+///
 /// Non-boolean results produce `EvaluationError { kind: type_error }`.
 pub fn evaluate_expression(
     expression: &ExpressionMatch,
     message: &Value,
-    cel_evaluator: &dyn CelEvaluator,
+    cel_evaluator: Option<&dyn CelEvaluator>,
 ) -> Result<bool, EvaluationError> {
+    let cel_evaluator = cel_evaluator.ok_or_else(|| EvaluationError {
+        kind: EvaluationErrorKind::CelError,
+        message: "CEL evaluator not available".to_string(),
+        indicator_id: None,
+    })?;
+
     // Build CEL context
     let mut context = serde_json::Map::new();
     context.insert("message".to_string(), message.clone());
 
-    // Resolve variables
+    // Resolve variables — unresolvable paths bind as null per EVAL-CEL-09
     if let Some(vars) = &expression.variables {
         for (name, path) in vars {
             let resolved = resolve_simple_path(path, message).unwrap_or(Value::Null);
@@ -249,7 +373,7 @@ pub fn evaluate_expression(
             kind: EvaluationErrorKind::TypeError,
             message: format!(
                 "CEL expression returned non-boolean result: {}",
-                serde_json::to_string(&result).unwrap_or_default()
+                serde_json::to_string(&result).unwrap_or_else(|_| "<unserializable>".to_string())
             ),
             indicator_id: None,
         }),
@@ -266,88 +390,54 @@ pub fn evaluate_indicator(
     cel_evaluator: Option<&dyn CelEvaluator>,
     semantic_evaluator: Option<&dyn SemanticEvaluator>,
 ) -> IndicatorVerdict {
-    let indicator_id = indicator.id.clone().unwrap_or_default();
+    let indicator_id = match &indicator.id {
+        Some(id) => id.clone(),
+        None => {
+            return make_verdict(
+                "<missing-id>".to_string(),
+                IndicatorResult::Error,
+                Some(
+                    "indicator has no id; document must be normalized before evaluation"
+                        .to_string(),
+                ),
+            );
+        }
+    };
 
     if let Some(ref pattern) = indicator.pattern {
-        // Pattern dispatch
         match evaluate_pattern(pattern, message) {
-            Ok(true) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::Matched,
-                timestamp: None,
-                evidence: None,
-                source: None,
-            },
-            Ok(false) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::NotMatched,
-                timestamp: None,
-                evidence: None,
-                source: None,
-            },
-            Err(e) => IndicatorVerdict {
-                indicator_id,
-                result: IndicatorResult::Error,
-                timestamp: None,
-                evidence: Some(e.message),
-                source: None,
-            },
+            Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
+            Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
+            Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
         }
     } else if let Some(ref expr) = indicator.expression {
-        // Expression dispatch
-        match cel_evaluator {
-            None => IndicatorVerdict {
+        if cel_evaluator.is_none() {
+            return make_verdict(
                 indicator_id,
-                result: IndicatorResult::Skipped,
-                timestamp: None,
-                evidence: Some("CEL evaluator not available".to_string()),
-                source: None,
-            },
-            Some(cel_eval) => match evaluate_expression(expr, message, cel_eval) {
-                Ok(true) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::Matched,
-                    timestamp: None,
-                    evidence: None,
-                    source: None,
-                },
-                Ok(false) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::NotMatched,
-                    timestamp: None,
-                    evidence: None,
-                    source: None,
-                },
-                Err(e) => IndicatorVerdict {
-                    indicator_id,
-                    result: IndicatorResult::Error,
-                    timestamp: None,
-                    evidence: Some(e.message),
-                    source: None,
-                },
-            },
+                IndicatorResult::Skipped,
+                Some("CEL evaluator not available".to_string()),
+            );
+        }
+        match evaluate_expression(expr, message, cel_evaluator) {
+            Ok(true) => make_verdict(indicator_id, IndicatorResult::Matched, None),
+            Ok(false) => make_verdict(indicator_id, IndicatorResult::NotMatched, None),
+            Err(e) => make_verdict(indicator_id, IndicatorResult::Error, Some(e.message)),
         }
     } else if let Some(ref semantic) = indicator.semantic {
-        // Semantic dispatch
         match semantic_evaluator {
-            None => IndicatorVerdict {
+            None => make_verdict(
                 indicator_id,
-                result: IndicatorResult::Skipped,
-                timestamp: None,
-                evidence: Some("Semantic evaluator not available".to_string()),
-                source: None,
-            },
+                IndicatorResult::Skipped,
+                Some("Semantic evaluator not available".to_string()),
+            ),
             Some(sem_eval) => evaluate_semantic(semantic, message, sem_eval, &indicator_id),
         }
     } else {
-        // No detection key present
-        IndicatorVerdict {
+        make_verdict(
             indicator_id,
-            result: IndicatorResult::Error,
-            timestamp: None,
-            evidence: Some("No detection key (pattern/expression/semantic) present".to_string()),
-            source: None,
-        }
+            IndicatorResult::Error,
+            Some("No detection key (pattern/expression/semantic) present".to_string()),
+        )
     }
 }
 
@@ -362,13 +452,7 @@ fn evaluate_semantic(
     let resolved = resolve_wildcard_path(target, message);
 
     if resolved.is_empty() {
-        return IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::NotMatched,
-            timestamp: None,
-            evidence: None,
-            source: None,
-        };
+        return make_verdict(indicator_id.to_string(), IndicatorResult::NotMatched, None);
     }
 
     let threshold = semantic.threshold.unwrap_or(0.7);
@@ -389,34 +473,25 @@ fn evaluate_semantic(
                 }
             }
             Err(e) => {
-                return IndicatorVerdict {
-                    indicator_id: indicator_id.to_string(),
-                    result: IndicatorResult::Error,
-                    timestamp: None,
-                    evidence: Some(e.message),
-                    source: None,
-                };
+                return make_verdict(
+                    indicator_id.to_string(),
+                    IndicatorResult::Error,
+                    Some(e.message),
+                );
             }
         }
     }
 
-    if highest_score >= threshold {
-        IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::Matched,
-            timestamp: None,
-            evidence: Some(format!("{:.2}", highest_score)),
-            source: None,
-        }
+    let result = if highest_score >= threshold {
+        IndicatorResult::Matched
     } else {
-        IndicatorVerdict {
-            indicator_id: indicator_id.to_string(),
-            result: IndicatorResult::NotMatched,
-            timestamp: None,
-            evidence: Some(format!("{:.2}", highest_score)),
-            source: None,
-        }
-    }
+        IndicatorResult::NotMatched
+    };
+    make_verdict(
+        indicator_id.to_string(),
+        result,
+        Some(format!("{:.2}", highest_score)),
+    )
 }
 
 /// Serialize a value to text for semantic evaluation.
@@ -426,7 +501,7 @@ fn value_to_text(value: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        _ => serde_json::to_string(value).unwrap_or_default(),
+        _ => serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_string()),
     }
 }
 
@@ -446,19 +521,17 @@ pub fn compute_verdict(
     let indicators = match &attack.indicators {
         Some(inds) => inds,
         None => {
-            return AttackVerdict {
-                attack_id: attack.id.clone(),
-                result: AttackResult::Error,
-                indicator_verdicts: vec![],
-                evaluation_summary: EvaluationSummary {
+            return build_attack_verdict(
+                attack.id.clone(),
+                AttackResult::Error,
+                vec![],
+                EvaluationSummary {
                     matched: 0,
                     not_matched: 0,
                     error: 0,
                     skipped: 0,
                 },
-                timestamp: None,
-                source: None,
-            };
+            );
         }
     };
 
@@ -489,34 +562,29 @@ pub fn compute_verdict(
                 collected_verdicts.push(v.clone());
             }
             None => {
-                // Missing entry → treated as skipped
                 skipped += 1;
-                collected_verdicts.push(IndicatorVerdict {
-                    indicator_id: ind_id.to_string(),
-                    result: IndicatorResult::Skipped,
-                    timestamp: None,
-                    evidence: Some("No evaluation result provided".to_string()),
-                    source: None,
-                });
+                collected_verdicts.push(make_verdict(
+                    ind_id.to_string(),
+                    IndicatorResult::Skipped,
+                    Some("No evaluation result provided".to_string()),
+                ));
             }
         }
     }
 
     // All-skipped → error: no evaluation occurred (§4.5)
     if skipped > 0 && matched == 0 && not_matched == 0 && error == 0 {
-        return AttackVerdict {
-            attack_id: attack.id.clone(),
-            result: AttackResult::Error,
-            indicator_verdicts: collected_verdicts,
-            evaluation_summary: EvaluationSummary {
+        return build_attack_verdict(
+            attack.id.clone(),
+            AttackResult::Error,
+            collected_verdicts,
+            EvaluationSummary {
                 matched,
                 not_matched,
                 error,
                 skipped,
             },
-            timestamp: None,
-            source: None,
-        };
+        );
     }
 
     let result = match logic {
@@ -542,17 +610,15 @@ pub fn compute_verdict(
         }
     };
 
-    AttackVerdict {
-        attack_id: attack.id.clone(),
+    build_attack_verdict(
+        attack.id.clone(),
         result,
-        indicator_verdicts: collected_verdicts,
-        evaluation_summary: EvaluationSummary {
+        collected_verdicts,
+        EvaluationSummary {
             matched,
             not_matched,
             error,
             skipped,
         },
-        timestamp: None,
-        source: None,
-    }
+    )
 }

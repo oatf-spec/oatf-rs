@@ -1,205 +1,289 @@
-/// A surface registry entry mapping surface name to protocol and default target path.
+/// A surface registry entry mapping protocol operation name to protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurfaceEntry {
     pub surface: &'static str,
     pub protocol: &'static str,
-    pub default_target: &'static str,
 }
 
-/// The v0.1 surface registry as a compile-time constant.
+/// The v0.3 surface registry built from protocol operation names.
+///
+/// SDKs do not need a compile-time surface registry for target resolution (§2.21).
+/// This registry is used only for V-018 warning validation.
 pub static SURFACE_REGISTRY: &[SurfaceEntry] = &[
-    // MCP surfaces
+    // MCP operations
     SurfaceEntry {
-        surface: "tool_description",
+        surface: "initialize",
         protocol: "mcp",
-        default_target: "tools[*].description",
     },
     SurfaceEntry {
-        surface: "tool_input_schema",
+        surface: "tools/list",
         protocol: "mcp",
-        default_target: "tools[*].inputSchema",
     },
     SurfaceEntry {
-        surface: "tool_name",
+        surface: "tools/call",
         protocol: "mcp",
-        default_target: "tools[*].name",
     },
     SurfaceEntry {
-        surface: "tool_annotations",
+        surface: "resources/list",
         protocol: "mcp",
-        default_target: "tools[*].annotations",
     },
     SurfaceEntry {
-        surface: "tool_output_schema",
+        surface: "resources/read",
         protocol: "mcp",
-        default_target: "tools[*].outputSchema",
     },
     SurfaceEntry {
-        surface: "tool_response",
+        surface: "resources/subscribe",
         protocol: "mcp",
-        default_target: "content[*]",
     },
     SurfaceEntry {
-        surface: "tool_structured_response",
+        surface: "resources/unsubscribe",
         protocol: "mcp",
-        default_target: "structuredContent",
     },
     SurfaceEntry {
-        surface: "tool_arguments",
+        surface: "prompts/list",
         protocol: "mcp",
-        default_target: "arguments",
     },
     SurfaceEntry {
-        surface: "resource_content",
+        surface: "prompts/get",
         protocol: "mcp",
-        default_target: "contents[*]",
     },
     SurfaceEntry {
-        surface: "resource_uri",
+        surface: "resources/templates/list",
         protocol: "mcp",
-        default_target: "resources[*].uri",
     },
     SurfaceEntry {
-        surface: "resource_description",
+        surface: "completion/complete",
         protocol: "mcp",
-        default_target: "resources[*].description",
     },
     SurfaceEntry {
-        surface: "prompt_content",
+        surface: "sampling/createMessage",
         protocol: "mcp",
-        default_target: "messages[*].content",
     },
     SurfaceEntry {
-        surface: "prompt_arguments",
+        surface: "elicitation/create",
         protocol: "mcp",
-        default_target: "arguments",
     },
     SurfaceEntry {
-        surface: "prompt_description",
+        surface: "tasks/get",
         protocol: "mcp",
-        default_target: "prompts[*].description",
     },
     SurfaceEntry {
-        surface: "server_notification",
+        surface: "tasks/result",
         protocol: "mcp",
-        default_target: "params",
     },
     SurfaceEntry {
-        surface: "server_capability",
+        surface: "tasks/list",
         protocol: "mcp",
-        default_target: "capabilities",
     },
     SurfaceEntry {
-        surface: "server_info",
+        surface: "tasks/cancel",
         protocol: "mcp",
-        default_target: "serverInfo",
     },
     SurfaceEntry {
-        surface: "sampling_request",
+        surface: "roots/list",
         protocol: "mcp",
-        default_target: "params",
     },
     SurfaceEntry {
-        surface: "elicitation_request",
+        surface: "ping",
         protocol: "mcp",
-        default_target: "params",
     },
     SurfaceEntry {
-        surface: "elicitation_response",
+        surface: "notifications/initialized",
         protocol: "mcp",
-        default_target: "result",
     },
     SurfaceEntry {
-        surface: "mcp_task_status",
+        surface: "notifications/roots/list_changed",
         protocol: "mcp",
-        default_target: "task",
     },
     SurfaceEntry {
-        surface: "mcp_task_result",
+        surface: "notifications/cancelled",
         protocol: "mcp",
-        default_target: "result",
     },
     SurfaceEntry {
-        surface: "roots_response",
+        surface: "notifications/tools/list_changed",
         protocol: "mcp",
-        default_target: "roots[*]",
     },
-    // A2A surfaces
     SurfaceEntry {
-        surface: "agent_card",
+        surface: "notifications/resources/list_changed",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/resources/updated",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/prompts/list_changed",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/tasks/status",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/elicitation/complete",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/message",
+        protocol: "mcp",
+    },
+    SurfaceEntry {
+        surface: "notifications/progress",
+        protocol: "mcp",
+    },
+    // A2A operations
+    SurfaceEntry {
+        surface: "message/send",
         protocol: "a2a",
-        default_target: "",
     },
     SurfaceEntry {
-        surface: "card_name",
+        surface: "message/stream",
         protocol: "a2a",
-        default_target: "name",
     },
     SurfaceEntry {
-        surface: "card_description",
+        surface: "tasks/resubscribe",
         protocol: "a2a",
-        default_target: "description",
     },
     SurfaceEntry {
-        surface: "skill_description",
+        surface: "tasks/pushNotificationConfig/set",
         protocol: "a2a",
-        default_target: "skills[*].description",
     },
     SurfaceEntry {
-        surface: "skill_name",
+        surface: "tasks/pushNotificationConfig/get",
         protocol: "a2a",
-        default_target: "skills[*].name",
     },
     SurfaceEntry {
-        surface: "task_message",
+        surface: "tasks/pushNotificationConfig/list",
         protocol: "a2a",
-        default_target: "messages[*]",
     },
     SurfaceEntry {
-        surface: "task_artifact",
+        surface: "tasks/pushNotificationConfig/delete",
         protocol: "a2a",
-        default_target: "artifacts[*]",
     },
     SurfaceEntry {
-        surface: "task_status",
+        surface: "agent/getAuthenticatedExtendedCard",
         protocol: "a2a",
-        default_target: "status.state",
     },
-    // AG-UI surfaces
     SurfaceEntry {
-        surface: "message_history",
+        surface: "agent_card/get",
+        protocol: "a2a",
+    },
+    SurfaceEntry {
+        surface: "task/status",
+        protocol: "a2a",
+    },
+    SurfaceEntry {
+        surface: "task/artifact",
+        protocol: "a2a",
+    },
+    // AG-UI operations
+    SurfaceEntry {
+        surface: "run_started",
         protocol: "ag_ui",
-        default_target: "messages[*]",
     },
     SurfaceEntry {
-        surface: "tool_definition",
+        surface: "run_finished",
         protocol: "ag_ui",
-        default_target: "tools[*]",
     },
     SurfaceEntry {
-        surface: "tool_result",
+        surface: "run_error",
         protocol: "ag_ui",
-        default_target: "messages[*]",
     },
     SurfaceEntry {
-        surface: "agent_state",
+        surface: "step_started",
         protocol: "ag_ui",
-        default_target: "state",
     },
     SurfaceEntry {
-        surface: "forwarded_props",
+        surface: "step_finished",
         protocol: "ag_ui",
-        default_target: "forwardedProps",
     },
     SurfaceEntry {
-        surface: "agent_event",
+        surface: "text_message_start",
         protocol: "ag_ui",
-        default_target: "data",
     },
     SurfaceEntry {
-        surface: "agent_tool_call",
+        surface: "text_message_content",
         protocol: "ag_ui",
-        default_target: "data",
+    },
+    SurfaceEntry {
+        surface: "text_message_end",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "tool_call_start",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "tool_call_args",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "tool_call_end",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "tool_call_result",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "state_snapshot",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "state_delta",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "messages_snapshot",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "activity_snapshot",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "activity_delta",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_start",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_message_start",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_message_content",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_message_end",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_message_chunk",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_end",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "reasoning_encrypted_value",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "raw",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "custom",
+        protocol: "ag_ui",
+    },
+    SurfaceEntry {
+        surface: "run_agent_input",
+        protocol: "ag_ui",
     },
 ];
 
@@ -208,10 +292,10 @@ pub fn lookup_surface(surface: &str) -> Option<&'static SurfaceEntry> {
     SURFACE_REGISTRY.iter().find(|e| e.surface == surface)
 }
 
-/// Known protocol identifiers for v0.1.
+/// Known protocol identifiers.
 pub static KNOWN_PROTOCOLS: &[&str] = &["mcp", "a2a", "ag_ui"];
 
-/// Known mode strings for v0.1.
+/// Known mode strings.
 pub static KNOWN_MODES: &[&str] = &[
     "mcp_server",
     "mcp_client",

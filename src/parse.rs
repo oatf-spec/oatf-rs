@@ -21,6 +21,21 @@ pub fn parse(input: &str) -> Result<Document, ParseError> {
         });
     }
 
+    const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    if input.len() > MAX_INPUT_SIZE {
+        return Err(ParseError {
+            kind: ParseErrorKind::Syntax,
+            message: format!(
+                "input size {} bytes exceeds maximum of {} bytes",
+                input.len(),
+                MAX_INPUT_SIZE
+            ),
+            path: None,
+            line: None,
+            column: None,
+        });
+    }
+
     // Check for YAML anchors, aliases, and merge keys (V-020)
     // We do a pre-scan of the raw text for anchor/alias markers
     check_yaml_anchors_aliases(input)?;
@@ -133,7 +148,7 @@ fn validate_extension_keys(doc: &Document) -> Result<(), ParseError> {
 }
 
 fn check_extensions(
-    extensions: &std::collections::HashMap<String, serde_json::Value>,
+    extensions: &indexmap::IndexMap<String, serde_json::Value>,
     path: &str,
 ) -> Result<(), ParseError> {
     for key in extensions.keys() {
@@ -174,7 +189,10 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
             continue;
         }
 
-        let in_content = strip_yaml_string_literals(trimmed);
+        // Strip inline comments before scanning for forbidden YAML features.
+        // This avoids false positives on comment text like `# <<:` or `# &anchor`.
+        let no_comment = strip_trailing_comment(trimmed);
+        let in_content = strip_yaml_string_literals(no_comment);
 
         // Check for merge keys
         if in_content.contains("<<:") || in_content.contains("<< :") {
@@ -207,6 +225,17 @@ fn check_yaml_anchors_aliases(input: &str) -> Result<(), ParseError> {
             return Err(ParseError {
                 kind: ParseErrorKind::Syntax,
                 message: "YAML aliases (*) are not allowed in OATF documents".to_string(),
+                path: None,
+                line: Some(i + 1),
+                column: Some(pos + 1),
+            });
+        }
+
+        // Check for custom YAML tags (! at value position)
+        if let Some(pos) = find_yaml_tag(&in_content) {
+            return Err(ParseError {
+                kind: ParseErrorKind::Syntax,
+                message: "custom YAML tags are not allowed in OATF documents".to_string(),
                 path: None,
                 line: Some(i + 1),
                 column: Some(pos + 1),
@@ -287,47 +316,50 @@ fn line_introduces_block_scalar(trimmed: &str) -> bool {
     matches!(v, "|" | ">" | "|-" | "|+" | ">-" | ">+")
 }
 
+fn skip_double_quoted(bytes: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn skip_single_quoted(bytes: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'\'' {
+                i += 1;
+            } else {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    i
+}
+
 /// Find the position of the key-value colon in a YAML line, skipping quoted strings.
 fn find_colon_in_yaml(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'\'' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' {
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
+            b'"' => i = skip_double_quoted(bytes, i),
+            b'\'' => i = skip_single_quoted(bytes, i),
             b':' if i + 1 >= bytes.len() || bytes[i + 1] == b' ' || bytes[i + 1] == b'\t' => {
                 return Some(i);
             }
-            _ => {
-                i += 1;
-            }
+            _ => i += 1,
         }
     }
     None
@@ -339,44 +371,15 @@ fn strip_trailing_comment(value: &str) -> &str {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'\'' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\'' {
-                        i += 1;
-                        if i < bytes.len() && bytes[i] == b'\'' {
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
+            b'"' => i = skip_double_quoted(bytes, i),
+            b'\'' => i = skip_single_quoted(bytes, i),
             b' ' if i + 1 < bytes.len() && bytes[i + 1] == b'#' => {
                 return &value[..i];
             }
             b'#' if i == 0 => {
                 return "";
             }
-            _ => {
-                i += 1;
-            }
+            _ => i += 1,
         }
     }
     value
@@ -464,6 +467,25 @@ fn find_yaml_alias(line: &str) -> Option<usize> {
             }
         }
         i += 1;
+    }
+    None
+}
+
+/// Find custom YAML tag (`!name`) in a line, returning position if found.
+/// Matches `!` in value position (preceded by space, colon, dash, or at line start)
+/// followed by a non-space character.
+fn find_yaml_tag(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'!' {
+            // Must be in value position
+            if i == 0 || bytes[i - 1] == b' ' || bytes[i - 1] == b':' || bytes[i - 1] == b'-' {
+                // Must be followed by a non-space char (tag name)
+                if i + 1 < bytes.len() && bytes[i + 1] != b' ' {
+                    return Some(i);
+                }
+            }
+        }
     }
     None
 }

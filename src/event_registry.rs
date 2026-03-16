@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 /// An entry in the event-mode validity registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventModeEntry {
@@ -9,6 +7,7 @@ pub struct EventModeEntry {
 
 /// The v0.1 Event-Mode Validity Registry as a compile-time constant.
 /// Each event maps to the set of modes for which it is valid.
+/// Source: format specification §7 Event-Mode Validity Matrix.
 pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     // MCP events
     EventModeEntry {
@@ -48,8 +47,12 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
+        event: "resources/templates/list",
+        valid_modes: &["mcp_server", "mcp_client"],
+    },
+    EventModeEntry {
         event: "completion/complete",
-        valid_modes: &["mcp_server"],
+        valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
         event: "sampling/createMessage",
@@ -61,7 +64,7 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/get",
-        valid_modes: &["mcp_server", "mcp_client", "a2a_server"],
+        valid_modes: &["mcp_server", "mcp_client", "a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "tasks/result",
@@ -69,11 +72,11 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/list",
-        valid_modes: &["mcp_server"],
+        valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
         event: "tasks/cancel",
-        valid_modes: &["mcp_server", "a2a_server"],
+        valid_modes: &["mcp_server", "mcp_client", "a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "roots/list",
@@ -81,6 +84,18 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "ping",
+        valid_modes: &["mcp_server", "mcp_client"],
+    },
+    EventModeEntry {
+        event: "notifications/initialized",
+        valid_modes: &["mcp_server"],
+    },
+    EventModeEntry {
+        event: "notifications/roots/list_changed",
+        valid_modes: &["mcp_server"],
+    },
+    EventModeEntry {
+        event: "notifications/cancelled",
         valid_modes: &["mcp_server", "mcp_client"],
     },
     EventModeEntry {
@@ -103,6 +118,18 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         event: "notifications/tasks/status",
         valid_modes: &["mcp_client"],
     },
+    EventModeEntry {
+        event: "notifications/elicitation/complete",
+        valid_modes: &["mcp_client"],
+    },
+    EventModeEntry {
+        event: "notifications/message",
+        valid_modes: &["mcp_client"],
+    },
+    EventModeEntry {
+        event: "notifications/progress",
+        valid_modes: &["mcp_client"],
+    },
     // A2A events
     EventModeEntry {
         event: "message/send",
@@ -114,15 +141,27 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
     },
     EventModeEntry {
         event: "tasks/resubscribe",
-        valid_modes: &["a2a_server"],
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
-        event: "tasks/pushNotification/set",
-        valid_modes: &["a2a_server"],
+        event: "tasks/pushNotificationConfig/set",
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
-        event: "tasks/pushNotification/get",
-        valid_modes: &["a2a_server"],
+        event: "tasks/pushNotificationConfig/get",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "tasks/pushNotificationConfig/list",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "tasks/pushNotificationConfig/delete",
+        valid_modes: &["a2a_server", "a2a_client"],
+    },
+    EventModeEntry {
+        event: "agent/getAuthenticatedExtendedCard",
+        valid_modes: &["a2a_server", "a2a_client"],
     },
     EventModeEntry {
         event: "agent_card/get",
@@ -174,7 +213,15 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
+        event: "tool_call_args",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
         event: "tool_call_end",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "tool_call_result",
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
@@ -190,16 +237,57 @@ pub static EVENT_MODE_REGISTRY: &[EventModeEntry] = &[
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
-        event: "interrupt",
+        event: "activity_snapshot",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "activity_delta",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_start",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_start",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_content",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_end",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_message_chunk",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_end",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "reasoning_encrypted_value",
+        valid_modes: &["ag_ui_client"],
+    },
+    EventModeEntry {
+        event: "raw",
         valid_modes: &["ag_ui_client"],
     },
     EventModeEntry {
         event: "custom",
         valid_modes: &["ag_ui_client"],
     },
+    // Synthetic event for AG-UI initial request submission (§7.3.2)
+    EventModeEntry {
+        event: "run_agent_input",
+        valid_modes: &["ag_ui_client"],
+    },
 ];
 
-/// Look up an event entry by its base event name (qualifier stripped).
+/// Look up an event entry by name.
 pub fn lookup_event(event: &str) -> Option<&'static EventModeEntry> {
     EVENT_MODE_REGISTRY.iter().find(|e| e.event == event)
 }
@@ -208,87 +296,6 @@ pub fn lookup_event(event: &str) -> Option<&'static EventModeEntry> {
 /// Returns None if the event is not in the registry (unrecognized event).
 pub fn is_event_valid_for_mode(event_base: &str, mode: &str) -> Option<bool> {
     lookup_event(event_base).map(|entry| entry.valid_modes.contains(&mode))
-}
-
-/// Strip qualifier from event string: "tools/call:calculator" -> "tools/call"
-pub fn strip_event_qualifier(event: &str) -> &str {
-    event.split(':').next().unwrap_or(event)
-}
-
-// ─── Qualifier Resolution Registry (§7) ─────────────────────────────────────
-
-struct QualifierResolutionEntry {
-    protocol: &'static str,
-    event: &'static str,
-    content_path: &'static str,
-}
-
-static QUALIFIER_RESOLUTION_REGISTRY: &[QualifierResolutionEntry] = &[
-    // MCP (§7.1.2)
-    QualifierResolutionEntry {
-        protocol: "mcp",
-        event: "tools/call",
-        content_path: "params.name",
-    },
-    QualifierResolutionEntry {
-        protocol: "mcp",
-        event: "prompts/get",
-        content_path: "params.name",
-    },
-    // A2A (§7.2.2)
-    QualifierResolutionEntry {
-        protocol: "a2a",
-        event: "task/status",
-        content_path: "status.state",
-    },
-    // AG-UI (§7.3.2)
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "tool_call_start",
-        content_path: "toolCallName",
-    },
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "tool_call_end",
-        content_path: "toolCallName",
-    },
-    QualifierResolutionEntry {
-        protocol: "ag_ui",
-        event: "custom",
-        content_path: "name",
-    },
-];
-
-fn lookup_qualifier_path(protocol: &str, event_base: &str) -> Option<&'static str> {
-    QUALIFIER_RESOLUTION_REGISTRY
-        .iter()
-        .find(|e| e.protocol == protocol && e.event == event_base)
-        .map(|e| e.content_path)
-}
-
-/// Resolves the qualifier for a given event base type from event content.
-///
-/// Looks up the content path in the qualifier resolution registry (§7) keyed
-/// by `(protocol, base_event)` and resolves it via
-/// [`crate::primitives::resolve_simple_path`]. Returns `None` if there is no
-/// registry entry for this protocol/event pair, the path does not resolve, or
-/// the resolved value is null/array/object.
-///
-/// Strings are returned unchanged; numbers and booleans use canonical JSON
-/// encoding (e.g. `true` → `"true"`, `42` → `"42"`).
-pub fn resolve_event_qualifier(
-    protocol: &str,
-    event_base: &str,
-    content: &Value,
-) -> Option<String> {
-    let path = lookup_qualifier_path(protocol, event_base)?;
-    let value = crate::primitives::resolve_simple_path(path, content)?;
-    match &value {
-        Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        _ => None, // null, array, object → None
-    }
 }
 
 /// Extract the protocol component from a mode string.
@@ -301,4 +308,22 @@ pub fn extract_protocol(mode: &str) -> &str {
     } else {
         mode
     }
+}
+
+/// Infer the single implicit protocol for the execution block.
+///
+/// Tries `execution.mode` first, then falls back to the single actor's mode
+/// in multi-actor form.  Returns `None` when the protocol is ambiguous
+/// (multiple actors with potentially different protocols).
+pub fn infer_execution_protocol(execution: &crate::types::Execution) -> Option<String> {
+    if let Some(mode) = &execution.mode {
+        return Some(extract_protocol(mode).to_string());
+    }
+    execution.actors.as_ref().and_then(|actors| {
+        if actors.len() == 1 {
+            Some(extract_protocol(&actors[0].mode).to_string())
+        } else {
+            None
+        }
+    })
 }

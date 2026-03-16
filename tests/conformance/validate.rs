@@ -94,9 +94,9 @@ fn validate_conformance_suite() {
                 case_ok = false;
             }
         } else if let Some(expected_errors) = &case.expected.errors {
-            if result.errors.is_empty() {
-                // V-014 CEL syntax validation requires the cel-eval feature
-                #[cfg(not(feature = "cel-eval"))]
+            if result.errors.is_empty() && !expected_errors.is_empty() {
+                // V-014 CEL syntax validation requires the cel-validate feature
+                #[cfg(not(feature = "cel-validate"))]
                 if expected_errors.iter().any(|e| e.rule == "V-014") {
                     skipped += 1;
                     continue;
@@ -246,12 +246,24 @@ fn validate_warnings_suite() {
                 }
             } else {
                 for expected in expected_errors {
-                    let found = result.errors.iter().any(|e| e.rule == expected.rule);
+                    let found = result.errors.iter().any(|e| {
+                        if e.rule != expected.rule {
+                            return false;
+                        }
+                        match &expected.path {
+                            Some(p) => e.path == *p,
+                            None => true,
+                        }
+                    });
                     if !found {
                         eprintln!(
-                            "  FAIL [{}] {}: expected error {} not found",
-                            case.id, case.name, expected.rule
+                            "  FAIL [{}] {}: expected error {} at {:?} not found",
+                            case.id, case.name, expected.rule, expected.path
                         );
+                        eprintln!("    Actual errors:");
+                        for e in &result.errors {
+                            eprintln!("      - {} at {}: {}", e.rule, e.path, e.message);
+                        }
                         failed += 1;
                         continue;
                     }
@@ -277,11 +289,19 @@ fn validate_warnings_suite() {
                 }
             } else {
                 for expected in expected_warnings {
-                    let found = result.warnings.iter().any(|w| w.code == expected.rule);
+                    let found = result.warnings.iter().any(|w| {
+                        if w.code != expected.rule {
+                            return false;
+                        }
+                        match &expected.path {
+                            Some(p) => w.path.as_deref() == Some(p.as_str()),
+                            None => true,
+                        }
+                    });
                     if !found {
                         eprintln!(
-                            "  FAIL [{}] {}: expected warning {} not found",
-                            case.id, case.name, expected.rule
+                            "  FAIL [{}] {}: expected warning {} at {:?} not found",
+                            case.id, case.name, expected.rule, expected.path
                         );
                         eprintln!("    Actual warnings:");
                         for w in &result.warnings {

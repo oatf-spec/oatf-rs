@@ -16,7 +16,8 @@ fn load_rejects_invalid_document() {
 oatf: "0.1"
 attack:
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -46,7 +47,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -98,7 +100,11 @@ fn make_semantic_indicator(id: &str, threshold: f64) -> Indicator {
     Indicator {
         id: Some(id.to_string()),
         protocol: None,
-        surface: "tool_description".to_string(),
+        surface: Some("tools/call".to_string()),
+        target: String::new(),
+        actor: None,
+        direction: None,
+        method: None,
         description: None,
         pattern: None,
         expression: None,
@@ -112,7 +118,7 @@ fn make_semantic_indicator(id: &str, threshold: f64) -> Indicator {
         confidence: None,
         severity: None,
         false_positives: None,
-        extensions: HashMap::new(),
+        extensions: indexmap::IndexMap::new(),
     }
 }
 
@@ -157,7 +163,11 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
         .map(|id| Indicator {
             id: Some(id.to_string()),
             protocol: None,
-            surface: "tool_description".to_string(),
+            surface: Some("tools/call".to_string()),
+            target: String::new(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: None,
@@ -165,7 +175,7 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         })
         .collect();
 
@@ -188,11 +198,11 @@ fn make_attack(indicator_ids: &[&str], logic: CorrelationLogic) -> Attack {
             state: None,
             phases: None,
             actors: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         },
         indicators: Some(indicators),
         correlation: Some(Correlation { logic: Some(logic) }),
-        extensions: HashMap::new(),
+        extensions: indexmap::IndexMap::new(),
     }
 }
 
@@ -323,7 +333,8 @@ attack:
           event: tools/call
       - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -362,7 +373,8 @@ attack:
               event: tools/call
           - name: terminal
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -390,7 +402,8 @@ attack:
           inputSchema:
             type: object
   indicators:
-    - surface: tool_description
+    - surface: tools/list
+      target: "tools[*].description"
       pattern:
         contains: test
 "#;
@@ -407,4 +420,174 @@ attack:
     assert_eq!(actors.len(), 1);
     assert_eq!(actors[0].name, "default");
     assert_eq!(actors[0].mode, "mcp_server");
+}
+
+// ─── 6. evaluate_indicator returns error for missing indicator ID ────────────
+
+#[test]
+fn evaluate_indicator_errors_on_missing_id() {
+    use oatf::evaluate::evaluate_indicator;
+
+    let indicator = Indicator {
+        id: None, // not normalized — missing ID
+        protocol: None,
+        surface: Some("tools/call".to_string()),
+        target: String::new(),
+        actor: None,
+        direction: None,
+        method: None,
+        description: None,
+        pattern: Some(oatf::types::PatternMatch {
+            target: Some("".to_string()),
+            contains: None,
+            starts_with: None,
+            ends_with: None,
+            regex: None,
+            any_of: None,
+            gt: None,
+            lt: None,
+            gte: None,
+            lte: None,
+            condition: Some(oatf::types::Condition::Equality(json!("test"))),
+        }),
+        expression: None,
+        semantic: None,
+        confidence: None,
+        severity: None,
+        false_positives: None,
+        extensions: indexmap::IndexMap::new(),
+    };
+    let message = json!("test");
+
+    let verdict = evaluate_indicator(&indicator, &message, None, None);
+    assert_eq!(
+        verdict.result,
+        IndicatorResult::Error,
+        "missing indicator ID must produce Error verdict"
+    );
+    assert!(
+        verdict
+            .evidence
+            .as_deref()
+            .unwrap_or("")
+            .contains("normalized"),
+        "error message should mention normalization"
+    );
+}
+
+// ─── 7. evaluate_pattern handles exists operator ─────────────────────────────
+
+#[test]
+fn pattern_exists_false_matches_when_target_absent() {
+    use oatf::evaluate::evaluate_pattern;
+    use oatf::types::{Condition, MatchCondition, PatternMatch};
+
+    let pattern = PatternMatch {
+        target: Some("tools[*].nonexistent".to_string()),
+        contains: None,
+        starts_with: None,
+        ends_with: None,
+        regex: None,
+        any_of: None,
+        gt: None,
+        lt: None,
+        gte: None,
+        lte: None,
+        condition: Some(Condition::Operators(MatchCondition {
+            contains: None,
+            starts_with: None,
+            ends_with: None,
+            regex: None,
+            any_of: None,
+            gt: None,
+            lt: None,
+            gte: None,
+            lte: None,
+            exists: Some(false),
+        })),
+    };
+    let message = json!({"tools": [{"name": "t1"}]});
+
+    let result = evaluate_pattern(&pattern, &message).unwrap();
+    assert!(
+        result,
+        "exists: false should match when target path does not resolve"
+    );
+}
+
+#[test]
+fn pattern_exists_false_does_not_match_when_target_present() {
+    use oatf::evaluate::evaluate_pattern;
+    use oatf::types::{Condition, MatchCondition, PatternMatch};
+
+    let pattern = PatternMatch {
+        target: Some("tools[*].name".to_string()),
+        contains: None,
+        starts_with: None,
+        ends_with: None,
+        regex: None,
+        any_of: None,
+        gt: None,
+        lt: None,
+        gte: None,
+        lte: None,
+        condition: Some(Condition::Operators(MatchCondition {
+            contains: None,
+            starts_with: None,
+            ends_with: None,
+            regex: None,
+            any_of: None,
+            gt: None,
+            lt: None,
+            gte: None,
+            lte: None,
+            exists: Some(false),
+        })),
+    };
+    let message = json!({"tools": [{"name": "t1"}]});
+
+    let result = evaluate_pattern(&pattern, &message).unwrap();
+    assert!(
+        !result,
+        "exists: false should NOT match when target resolves to values"
+    );
+}
+
+#[test]
+fn pattern_exists_false_with_other_ops_always_false() {
+    use oatf::evaluate::evaluate_pattern;
+    use oatf::types::{Condition, MatchCondition, PatternMatch};
+
+    let pattern = PatternMatch {
+        target: Some("tools[*].name".to_string()),
+        contains: None,
+        starts_with: None,
+        ends_with: None,
+        regex: None,
+        any_of: None,
+        gt: None,
+        lt: None,
+        gte: None,
+        lte: None,
+        condition: Some(Condition::Operators(MatchCondition {
+            contains: Some("foo".to_string()),
+            starts_with: None,
+            ends_with: None,
+            regex: None,
+            any_of: None,
+            gt: None,
+            lt: None,
+            gte: None,
+            lte: None,
+            exists: Some(false),
+        })),
+    };
+
+    // Even when target is absent, exists:false + contains → always false
+    let message = json!({"tools": [{"description": "d"}]});
+    let result = evaluate_pattern(&pattern, &message).unwrap();
+    assert!(
+        !result,
+        "exists: false + other operator should always be false"
+    );
 }

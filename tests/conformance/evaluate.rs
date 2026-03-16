@@ -29,7 +29,8 @@ struct PatternInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct PatternIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     pattern: Value,
 }
 
@@ -54,6 +55,10 @@ fn evaluate_pattern_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: Some(pattern),
             expression: None,
@@ -61,7 +66,7 @@ fn evaluate_pattern_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let verdict = evaluate::evaluate_indicator(&indicator, &case.input.message, None, None);
@@ -119,7 +124,8 @@ struct ExpressionInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct ExpressionIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     expression: ExpressionMatchDef,
 }
 
@@ -159,6 +165,10 @@ fn evaluate_expression_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: Some(expr),
@@ -166,7 +176,7 @@ fn evaluate_expression_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         // When cel-eval feature is disabled, skip tests that require a present evaluator
@@ -244,7 +254,8 @@ struct SemanticInput {
 
 #[derive(Debug, serde::Deserialize)]
 struct SemanticIndicatorDef {
-    surface: String,
+    surface: Option<String>,
+    target: Option<String>,
     semantic: SemanticMatchDef,
 }
 
@@ -310,6 +321,10 @@ fn evaluate_semantic_suite() {
             id: Some(case.id.clone()),
             protocol: None,
             surface: case.input.indicator.surface.clone(),
+            target: case.input.indicator.target.clone().unwrap_or_default(),
+            actor: None,
+            direction: None,
+            method: None,
             description: None,
             pattern: None,
             expression: None,
@@ -317,7 +332,7 @@ fn evaluate_semantic_suite() {
             confidence: None,
             severity: None,
             false_positives: None,
-            extensions: HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let mock_evaluator = case

@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Rust SDK for the [Open Agent Threat Format (OATF)](https://oatf.io).
 //!
 //! OATF is a YAML-based format for describing security threats against AI agent
@@ -29,7 +30,8 @@
 //!           event: tools/call
 //!       - name: terminal
 //!   indicators:
-//!     - surface: tool_description
+//!     - surface: tools/list
+//!       target: "tools[*].description"
 //!       pattern:
 //!         contains: malicious
 //! "#;
@@ -42,7 +44,8 @@
 //!
 //! | Feature    | Default | Description |
 //! |------------|---------|-------------|
-//! | `cel-eval` | yes     | CEL expression evaluation via the [`cel`] crate. Enables [`evaluate::DefaultCelEvaluator`]. |
+//! | `cel-validate` | yes | CEL expression syntax validation (`V-014`) via the [`cel`] crate parser. |
+//! | `cel-eval` | yes     | Default CEL expression evaluation via the [`cel`] crate. Enables [`evaluate::DefaultCelEvaluator`]. |
 
 pub mod enums;
 pub mod error;
@@ -54,7 +57,7 @@ pub mod serialize;
 pub mod types;
 pub mod validate;
 
-pub(crate) mod event_registry;
+pub mod event_registry;
 pub(crate) mod surface;
 
 pub use error::*;
@@ -65,6 +68,24 @@ pub use normalize::normalize;
 pub use parse::parse;
 pub use serialize::serialize;
 pub use validate::validate;
+
+/// Returns the set of known mode strings for v0.1.
+///
+/// These are the modes recognized by the SDK's validation and normalization
+/// logic. Mode values not in this set but matching the `[a-z][a-z0-9_]*_(server|client)`
+/// pattern are accepted with a W-002 warning.
+pub fn known_modes() -> &'static [&'static str] {
+    surface::KNOWN_MODES
+}
+
+/// Returns the set of known protocol identifiers for v0.1.
+///
+/// These are the protocols recognized by the SDK's validation logic.
+/// Protocol values not in this set but matching the `[a-z][a-z0-9_]*`
+/// pattern are accepted with a W-003 warning.
+pub fn known_protocols() -> &'static [&'static str] {
+    surface::KNOWN_PROTOCOLS
+}
 
 /// Result of the [`load`] convenience entry point.
 pub struct LoadResult {
@@ -103,7 +124,8 @@ pub struct LoadResult {
 ///           event: tools/call
 ///       - name: terminal
 ///   indicators:
-///     - surface: tool_description
+///     - surface: tools/list
+///       target: "tools[*].description"
 ///       pattern:
 ///         contains: test
 /// "#;

@@ -288,7 +288,7 @@ fn evaluate_condition_suite() {
 /// Parse a condition from a raw JSON value (same logic as Condition::from_value
 /// but for test input which can be a bare scalar or an operator object).
 fn parse_condition(value: &Value) -> Condition {
-    Condition::from_value(value.clone())
+    Condition::from_value(value.clone()).expect("invalid condition in test data")
 }
 
 // --- evaluate_predicate ------------------------------------------------------
@@ -602,7 +602,7 @@ fn compute_effective_state_suite() {
                 extractors: None,
                 on_enter: None,
                 trigger: None,
-                extensions: std::collections::HashMap::new(),
+                extensions: indexmap::IndexMap::new(),
             })
             .collect();
 
@@ -628,65 +628,6 @@ fn compute_effective_state_suite() {
     assert_eq!(failed, 0, "{} compute_effective_state tests failed", failed);
 }
 
-// --- resolve_event_qualifier -------------------------------------------------
-
-#[derive(Debug, serde::Deserialize)]
-struct QualifierCase {
-    name: String,
-    id: String,
-    input: QualifierInput,
-    expected: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct QualifierInput {
-    protocol: String,
-    base_event: String,
-    content: Value,
-}
-
-#[test]
-fn resolve_event_qualifier_suite() {
-    let path = conformance_dir().join("primitives/resolve-event-qualifier.yaml");
-    assert!(
-        path.exists(),
-        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
-        path
-    );
-
-    let content = std::fs::read_to_string(&path).unwrap();
-    let cases: Vec<QualifierCase> = serde_saphyr::from_str(&content).unwrap();
-
-    let mut passed = 0;
-    let mut failed = 0;
-
-    for case in &cases {
-        let result = primitives::resolve_event_qualifier(
-            &case.input.protocol,
-            &case.input.base_event,
-            &case.input.content,
-        );
-
-        if result == case.expected {
-            passed += 1;
-        } else {
-            eprintln!(
-                "  FAIL [{}] {}: expected {:?}, got {:?}",
-                case.id, case.name, case.expected, result
-            );
-            failed += 1;
-        }
-    }
-
-    eprintln!(
-        "\nresolve_event_qualifier: {} passed, {} failed out of {} total",
-        passed,
-        failed,
-        cases.len()
-    );
-    assert_eq!(failed, 0, "{} resolve_event_qualifier tests failed", failed);
-}
-
 // --- evaluate_trigger --------------------------------------------------------
 
 #[derive(Debug, serde::Deserialize)]
@@ -703,7 +644,8 @@ struct TriggerInput {
     event: Option<TriggerEventDef>,
     elapsed: String,
     state: TriggerStateDef,
-    protocol: String,
+    #[serde(default)]
+    protocol: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -721,8 +663,6 @@ struct TriggerDef {
 #[derive(Debug, serde::Deserialize)]
 struct TriggerEventDef {
     event_type: String,
-    #[serde(default)]
-    qualifier: Option<String>,
     content: Value,
 }
 
@@ -769,7 +709,6 @@ fn evaluate_trigger_suite() {
 
         let event = case.input.event.as_ref().map(|e| ProtocolEvent {
             event_type: e.event_type.clone(),
-            qualifier: e.qualifier.clone(),
             content: e.content.clone(),
         });
 
@@ -778,13 +717,7 @@ fn evaluate_trigger_suite() {
             event_count: case.input.state.event_count,
         };
 
-        let result = primitives::evaluate_trigger(
-            &trigger,
-            event.as_ref(),
-            elapsed,
-            &mut state,
-            &case.input.protocol,
-        );
+        let result = primitives::evaluate_trigger(&trigger, event.as_ref(), elapsed, &mut state);
 
         let (result_str, reason_str) = match &result {
             TriggerResult::Advanced { reason } => {
@@ -894,6 +827,154 @@ fn interpolate_value_suite() {
         cases.len()
     );
     assert_eq!(failed, 0, "{} interpolate_value tests failed", failed);
+}
+
+// --- extract_protocol --------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct ExtractProtocolCase {
+    name: String,
+    id: String,
+    input: ExtractProtocolInput,
+    expected: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExtractProtocolInput {
+    mode: String,
+}
+
+#[test]
+fn extract_protocol_suite() {
+    let path = conformance_dir().join("primitives/extract-protocol.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<ExtractProtocolCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        let result = oatf::event_registry::extract_protocol(&case.input.mode);
+
+        if result == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nextract_protocol: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} extract_protocol tests failed", failed);
+}
+
+// --- select_response ---------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseCase {
+    name: String,
+    id: String,
+    input: SelectResponseInput,
+    expected: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseInput {
+    entries: Vec<SelectResponseEntryDef>,
+    request: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SelectResponseEntryDef {
+    #[serde(default)]
+    when: Option<Value>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, Value>,
+}
+
+#[test]
+fn select_response_suite() {
+    let path = conformance_dir().join("primitives/select-response.yaml");
+    assert!(
+        path.exists(),
+        "Conformance fixture not found: {:?}. Is the spec submodule initialized?",
+        path
+    );
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    let cases: Vec<SelectResponseCase> = serde_saphyr::from_str(&content).unwrap();
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for case in &cases {
+        // Build ResponseEntry from test input
+        let entries: Vec<ResponseEntry> = case
+            .input
+            .entries
+            .iter()
+            .map(|e| {
+                let when = e.when.as_ref().map(|v| parse_match_predicate(v));
+                ResponseEntry {
+                    when,
+                    synthesize: None,
+                    extra: e
+                        .extra
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                }
+            })
+            .collect();
+
+        let result = primitives::select_response(&entries, &case.input.request);
+
+        let result_value = match result {
+            Some(entry) => {
+                // Reconstruct the value to compare: take extra fields
+                Value::Object(
+                    entry
+                        .extra
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                )
+            }
+            None => Value::Null,
+        };
+
+        if result_value == case.expected {
+            passed += 1;
+        } else {
+            eprintln!(
+                "  FAIL [{}] {}: expected {:?}, got {:?}",
+                case.id, case.name, case.expected, result_value
+            );
+            failed += 1;
+        }
+    }
+
+    eprintln!(
+        "\nselect_response: {} passed, {} failed out of {} total",
+        passed,
+        failed,
+        cases.len()
+    );
+    assert_eq!(failed, 0, "{} select_response tests failed", failed);
 }
 
 // --- evaluate_extractor direction tests (supplementary) ----------------------

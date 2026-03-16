@@ -4,8 +4,7 @@
 //! and resolves shorthand patterns. `normalize(normalize(doc)) == normalize(doc)`.
 
 use crate::enums::*;
-use crate::event_registry::extract_protocol;
-use crate::surface::lookup_surface;
+use crate::event_registry::infer_execution_protocol;
 use crate::types::*;
 
 /// Normalize a validated document into its canonical fully-expanded form.
@@ -33,8 +32,8 @@ pub fn normalize(mut doc: Document) -> Document {
     // N-005: Expand pattern shorthand to standard form
     n005_expand_pattern_shorthand(&mut doc);
 
-    // N-008: Apply MCP tool field defaults
-    n008_mcp_tool_defaults(&mut doc);
+    // N-008: Normalize classification tags
+    n008_normalize_tags(&mut doc);
 
     doc
 }
@@ -95,24 +94,7 @@ fn n001_defaults(doc: &mut Document) {
 
     // indicator.protocol → protocol component of resolved mode
     if let Some(indicators) = &mut attack.indicators {
-        let exec_protocol = attack
-            .execution
-            .mode
-            .as_deref()
-            .map(extract_protocol)
-            .map(|s| s.to_string());
-
-        // In multi-actor form after normalization, we may not have execution.mode
-        // If actors exist, check for a single default actor
-        let actor_protocol = attack.execution.actors.as_ref().and_then(|actors| {
-            if actors.len() == 1 {
-                Some(extract_protocol(&actors[0].mode).to_string())
-            } else {
-                None
-            }
-        });
-
-        let default_protocol = exec_protocol.or(actor_protocol);
+        let default_protocol = infer_execution_protocol(&attack.execution);
 
         for ind in indicators.iter_mut() {
             if ind.protocol.is_none()
@@ -151,25 +133,12 @@ fn n001_defaults(doc: &mut Document) {
 // ─── N-002: Severity scalar expansion ────────────────────────────────────────
 
 fn n002_severity_expansion(doc: &mut Document) {
-    if let Some(ref severity) = doc.attack.severity {
-        match severity {
-            Severity::Scalar(level) => {
-                doc.attack.severity = Some(Severity::Object {
-                    level: level.clone(),
-                    confidence: Some(50),
-                });
-            }
-            Severity::Object {
-                confidence: None,
-                level,
-            } => {
-                doc.attack.severity = Some(Severity::Object {
-                    level: level.clone(),
-                    confidence: Some(50),
-                });
-            }
-            _ => {}
-        }
+    if let Some(Severity::Scalar(level)) = &doc.attack.severity {
+        let level = level.clone();
+        doc.attack.severity = Some(Severity::Object {
+            level,
+            confidence: Some(50),
+        });
     }
 }
 
@@ -190,25 +159,21 @@ fn n003_auto_generate_indicator_ids(doc: &mut Document) {
     }
 }
 
-// ─── N-004: Resolve pattern/semantic targets from surface registry ───────────
+// ─── N-004: Resolve pattern/semantic targets from indicator target ────────────
 
 fn n004_resolve_targets(doc: &mut Document) {
     if let Some(indicators) = &mut doc.attack.indicators {
         for ind in indicators.iter_mut() {
-            let surface_entry = lookup_surface(&ind.surface);
-
             if let Some(ref mut pattern) = ind.pattern
                 && pattern.target.is_none()
-                && let Some(entry) = surface_entry
             {
-                pattern.target = Some(entry.default_target.to_string());
+                pattern.target = Some(ind.target.clone());
             }
 
             if let Some(ref mut semantic) = ind.semantic
                 && semantic.target.is_none()
-                && let Some(entry) = surface_entry
             {
-                semantic.target = Some(entry.default_target.to_string());
+                semantic.target = Some(ind.target.clone());
             }
         }
     }
@@ -241,6 +206,18 @@ fn n005_expand_pattern_shorthand(doc: &mut Document) {
     }
 }
 
+// ─── N-008: Normalize classification tags ─────────────────────────────────────
+
+fn n008_normalize_tags(doc: &mut Document) {
+    if let Some(ref mut classification) = doc.attack.classification
+        && let Some(ref mut tags) = classification.tags
+    {
+        for tag in tags.iter_mut() {
+            *tag = tag.to_lowercase().replace(['_', ' '], "-");
+        }
+    }
+}
+
 // ─── N-006: Normalize single-phase form to multi-actor form ──────────────────
 
 fn n006_single_phase_to_multi_actor(doc: &mut Document) {
@@ -257,14 +234,14 @@ fn n006_single_phase_to_multi_actor(doc: &mut Document) {
             extractors: None,
             on_enter: None,
             trigger: None,
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         let actor = Actor {
             name: "default".to_string(),
             mode: mode.clone(),
             phases: vec![phase],
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         doc.attack.execution.actors = Some(vec![actor]);
@@ -278,7 +255,9 @@ fn n006_single_phase_to_multi_actor(doc: &mut Document) {
 fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
     let exec = &doc.attack.execution;
     if exec.phases.is_some() && exec.actors.is_none() {
-        let phases = exec.phases.clone().unwrap();
+        let Some(phases) = exec.phases.clone() else {
+            return;
+        };
         let mode = exec
             .mode
             .clone()
@@ -292,55 +271,11 @@ fn n007_multi_phase_to_multi_actor(doc: &mut Document) {
             name: "default".to_string(),
             mode,
             phases,
-            extensions: std::collections::HashMap::new(),
+            extensions: indexmap::IndexMap::new(),
         };
 
         doc.attack.execution.actors = Some(vec![actor]);
         doc.attack.execution.phases = None;
         doc.attack.execution.mode = None;
-    }
-}
-
-// ─── N-008: Apply MCP tool field defaults ────────────────────────────────────
-
-fn n008_mcp_tool_defaults(doc: &mut Document) {
-    if let Some(actors) = &mut doc.attack.execution.actors {
-        for actor in actors.iter_mut() {
-            if actor.mode != "mcp_server" {
-                continue;
-            }
-
-            for phase in &mut actor.phases {
-                if let Some(ref mut state) = phase.state {
-                    apply_mcp_tool_defaults(state);
-                }
-            }
-        }
-    }
-}
-
-fn apply_mcp_tool_defaults(state: &mut serde_json::Value) {
-    if let Some(obj) = state.as_object_mut()
-        && let Some(tools) = obj.get_mut("tools")
-        && let Some(tools_arr) = tools.as_array_mut()
-    {
-        for tool in tools_arr.iter_mut() {
-            if let Some(tool_obj) = tool.as_object_mut() {
-                // inputSchema defaults to {"type": "object"}
-                if !tool_obj.contains_key("inputSchema") {
-                    tool_obj.insert(
-                        "inputSchema".to_string(),
-                        serde_json::json!({"type": "object"}),
-                    );
-                }
-                // description defaults to ""
-                if !tool_obj.contains_key("description") {
-                    tool_obj.insert(
-                        "description".to_string(),
-                        serde_json::Value::String(String::new()),
-                    );
-                }
-            }
-        }
     }
 }

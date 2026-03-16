@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b86e2207281c6242e40ad3fd5f0fd09c6cba853edfd1e1319792e86af616378a # shrinks to mode = "mcp_server", tool_name = "aa", severity = "informational"
+cc b5317f431194027d75601a38bfc4b0e52db52738f4148dc1d5a6338f2f2fc9e8 # shrinks to mode = "mcp_server", tool_name = "aa", tool_desc = "aa"
+cc db25b6580fc10b35763989de452680cd04a47836fc9bf5f00ca44815a7b23afa # shrinks to mode = "mcp_server", tool_name = "aa", tool_desc = "aa"

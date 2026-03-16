@@ -1,14 +1,18 @@
-//! Document validation against conformance rules V-001 through V-045.
+//! Document validation against conformance rules V-001 through V-049.
 //!
 //! Returns **all** errors and warnings, not just the first. Validation does not
 //! modify the document.
 
 use crate::error::*;
-use crate::event_registry::{extract_protocol, is_event_valid_for_mode, strip_event_qualifier};
+use crate::event_registry::{extract_protocol, infer_execution_protocol, is_event_valid_for_mode};
+use crate::primitives::{compile_user_regex, is_valid_simple_dot_path, is_valid_wildcard_dot_path};
 use crate::surface::{KNOWN_MODES, KNOWN_PROTOCOLS, lookup_surface};
 use crate::types::*;
 use regex::Regex;
+use serde_json::Value;
 use std::sync::LazyLock;
+
+const MAX_VALUE_DEPTH: usize = 128;
 
 // ─── Helper: construct ValidationError with auto-populated spec_ref ─────────
 
@@ -28,22 +32,22 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-003" => "§11.1.3",
         "V-004" => "§11.1.4",
         "V-005" => "§11.1.5",
-        "V-006" => "§11.1.6",
-        "V-007" => "§11.1.8",
-        "V-008" => "§11.1.8",
-        "V-009" => "§11.1.8",
+        "V-006" => "§11.1.9",
+        "V-007" => "§11.1.7",
+        "V-008" => "§11.1.7",
+        "V-009" => "§11.1.7",
         "V-010" => "§11.1.10",
-        "V-011" => "§11.1.8",
+        "V-011" => "§11.1.7",
         "V-012" => "§11.1.11",
-        "V-013" => "§5.7",
-        "V-014" => "§5.7",
-        "V-015" => "§5.7",
+        "V-013" => "§6.2",
+        "V-014" => "§6.3",
+        "V-015" => "§5.5",
         "V-016" => "§5.7",
         "V-017" => "§4.3",
         "V-018" => "§7",
         "V-019" => "§5.3",
         "V-020" => "§11.1.1",
-        "V-021" => "§6.2",
+        "V-021" => "§6.1",
         "V-022" => "§6.4",
         "V-023" => "§4.2",
         "V-024" => "§6.1",
@@ -56,18 +60,22 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-031" => "§5.1",
         "V-032" => "§5.5",
         "V-033" => "§11.1.14",
-        "V-034" => "§11.1.15",
-        "V-035" => "§11.1.16",
-        "V-036" => "§5.1",
-        "V-037" => "§4.2",
-        "V-038" => "§5.3",
-        "V-039" => "§5.5",
-        "V-040" => "§11.1.8",
-        "V-041" => "§11.1.17",
-        "V-042" => "§5.2",
+        "V-034" => "§5.1",
+        "V-035" => "§4.2",
+        "V-036" => "§5.2",
+        "V-037" => "§5.5",
+        "V-038" => "§11.1.7",
+        "V-039" => "§11.1.15",
+        "V-040" => "§5.3",
+        "V-041" => "§11.1.16",
+        "V-042" => "§5.5",
         "V-043" => "§5.2",
-        "V-044" => "§5.5",
-        "V-045" => "§5.2",
+        "V-044" => "§5.2",
+        "V-045" => "§4.2",
+        "V-046" => "§4.2",
+        "V-047" => "§2.3a",
+        "V-048" => "§6.1",
+        "V-049" => "§6.1",
         _ => "",
     }
 }
@@ -92,15 +100,9 @@ static CROSS_ACTOR_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
 static CEL_ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
-static SHORTHAND_DURATION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[0-9]+[smhd]$").unwrap());
-
-static ISO_DURATION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^P([0-9]+D)?(T([0-9]+H)?([0-9]+M)?([0-9]+S)?)?$").unwrap());
-
 static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
-/// Validate a parsed document against all 45 conformance rules (V-001..V-045).
+/// Validate a parsed document against all conformance rules (V-001..V-049).
 /// Returns a ValidationResult containing all errors and warnings found.
 pub fn validate(doc: &Document) -> ValidationResult {
     let mut errors = Vec::new();
@@ -115,6 +117,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v007_phases_non_empty(doc, &mut errors);
     v008_terminal_phase(doc, &mut errors);
     v009_first_phase_state(doc, &mut errors);
+    check_state_is_object(doc, &mut errors);
     v010_unique_indicator_ids(doc, &mut errors);
     v011_unique_phase_names(doc, &mut errors);
     v012_exactly_one_detection_key(doc, &mut errors);
@@ -124,7 +127,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v015_jsonpath_valid(doc, &mut errors);
     v016_template_syntax(doc, &mut errors);
     v017_severity_confidence(doc, &mut errors);
-    v018_surface_protocol(doc, &mut errors, &mut warnings);
+    v018_surface_protocol(doc, &mut warnings);
     v019_count_match_require_event(doc, &mut errors);
     v021_target_path_syntax(doc, &mut errors);
     v022_semantic_threshold(doc, &mut errors);
@@ -138,22 +141,28 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v030_mutual_exclusion(doc, &mut errors);
     v031_multi_actor_constraints(doc, &mut errors);
     v032_cross_actor_refs(doc, &mut errors);
-    v033_content_synthesize_exclusivity(doc, &mut errors);
-    v034_catch_all_constraints(doc, &mut errors);
-    v035_synthesize_prompt(doc, &mut errors);
-    v036_mode_protocol_pattern(doc, &mut errors, &mut warnings);
-    v037_version_positive(doc, &mut errors);
-    v038_trigger_after_duration(doc, &mut errors);
-    v039_extractor_name_pattern(doc, &mut errors);
-    v040_extractors_non_empty(doc, &mut errors);
-    v041_expression_variable_keys(doc, &mut errors);
-    v042_trigger_event_or_after(doc, &mut errors);
-    v043_binding_specific_action_keys(doc, &mut errors);
-    v044_regex_extractor_capture_group(doc, &mut errors);
-    v045_on_enter_non_empty(doc, &mut errors);
+    v033_catch_all_constraints(doc, &mut errors); // was V-034
+    v034_mode_protocol_pattern(doc, &mut errors, &mut warnings); // was V-036
+    v035_version_positive(doc, &mut errors); // was V-037
+    v036_trigger_after_duration(doc, &mut errors); // was V-038
+    v037_extractor_name_pattern(doc, &mut errors); // was V-039
+    v038_extractors_non_empty(doc, &mut errors); // was V-040
+    v039_expression_variable_keys(doc, &mut errors); // was V-041
+    v040_trigger_event_or_after(doc, &mut errors); // was V-042
+    // V-041 is enforced at parse time (Action::deserialize rejects != 1 non-extension key).
+    v042_regex_extractor_capture_group(doc, &mut errors); // was V-044
+    v043_on_enter_non_empty(doc, &mut errors); // was V-045
+    v044_phase_mode_matches_actor(doc, &mut errors); // was V-046
+    v045_impact_no_duplicates(doc, &mut errors); // was V-048
+    v046_grace_period_duration(doc, &mut errors); // was V-049
+    v047_correlation_requires_indicators(doc, &mut errors); // was V-050
+    v048_indicator_actor(doc, &mut errors); // new
+    v049_indicator_method(doc, &mut errors); // new
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
+    w006_synthesize_present(doc, &mut warnings);
+    w007_semantic_indicator(doc, &mut warnings);
 
     ValidationResult { errors, warnings }
 }
@@ -199,15 +208,12 @@ fn collect_actors(doc: &Document) -> Vec<ActorInfo<'_>> {
     }
 }
 
-fn resolve_mode(
-    doc: &Document,
-    actor_mode: Option<&str>,
-    phase_mode: Option<&str>,
-) -> Option<String> {
-    phase_mode
-        .or(actor_mode)
-        .or(doc.attack.execution.mode.as_deref())
-        .map(|s| s.to_string())
+fn collect_actor_names(doc: &Document) -> std::collections::HashSet<String> {
+    if let Some(actors) = &doc.attack.execution.actors {
+        actors.iter().map(|a| a.name.clone()).collect()
+    } else {
+        std::iter::once("default".to_string()).collect()
+    }
 }
 
 // ─── V-001 ──────────────────────────────────────────────────────────────────
@@ -225,28 +231,71 @@ fn v001_oatf_version(doc: &Document, errors: &mut Vec<ValidationError>) {
 // ─── V-005 ──────────────────────────────────────────────────────────────────
 
 fn v005_enum_values(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // V-005 validates execution.mode pattern; V-036 validates actor/phase modes.
-    if let Some(mode) = &doc.attack.execution.mode
-        && !MODE_RE.is_match(mode)
-    {
-        errors.push(verr(
-            "V-005",
-            "attack.execution.mode",
-            format!(
-                "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
-                mode
-            ),
-        ));
-    }
+    // Validate elicitation_responses action enum in state
+    let check_elicitation_responses =
+        |state: &Value, path_prefix: &str, errors: &mut Vec<ValidationError>| {
+            if let Some(entries) = state
+                .get("elicitation_responses")
+                .and_then(|v| v.as_array())
+            {
+                static VALID_ELICITATION_ACTIONS: &[&str] = &["accept", "decline", "cancel"];
+                for (ei, entry) in entries.iter().enumerate() {
+                    if let Some(action_val) = entry.get("action") {
+                        match action_val.as_str() {
+                            Some(action) if VALID_ELICITATION_ACTIONS.contains(&action) => {}
+                            Some(action) => {
+                                errors.push(verr(
+                                "V-005",
+                                format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                                format!(
+                                    "invalid elicitation_responses action: '{}', must be one of: accept, decline, cancel",
+                                    action
+                                ),
+                            ));
+                            }
+                            None => {
+                                errors.push(verr(
+                                    "V-005",
+                                    format!("{}.elicitation_responses[{}].action", path_prefix, ei),
+                                    format!(
+                                        "elicitation_responses action must be a string, got {}",
+                                        action_val
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        };
 
-    if let Some(indicators) = &doc.attack.indicators {
-        for (i, ind) in indicators.iter().enumerate() {
-            if lookup_surface(&ind.surface).is_none() {
-                errors.push(verr(
-                    "V-005",
-                    format!("attack.indicators[{}].surface", i),
-                    format!("unknown surface: '{}'", ind.surface),
-                ));
+    // Check execution.state
+    if let Some(state) = &doc.attack.execution.state {
+        check_elicitation_responses(state, "attack.execution.state", errors);
+    }
+    // Check phase states
+    if let Some(phases) = &doc.attack.execution.phases {
+        for (pi, phase) in phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                check_elicitation_responses(
+                    state,
+                    &format!("attack.execution.phases[{}].state", pi),
+                    errors,
+                );
+            }
+        }
+    }
+    // Check actor phase states
+    if let Some(actors) = &doc.attack.execution.actors {
+        for (ai, actor) in actors.iter().enumerate() {
+            for (pi, phase) in actor.phases.iter().enumerate() {
+                if let Some(state) = &phase.state {
+                    check_elicitation_responses(
+                        state,
+                        &format!("attack.execution.actors[{}].phases[{}].state", ai, pi),
+                        errors,
+                    );
+                }
             }
         }
     }
@@ -419,19 +468,25 @@ fn v012_exactly_one_detection_key(doc: &Document, errors: &mut Vec<ValidationErr
     }
 }
 
-/// Reject patterns that have both `condition` and shorthand operator fields.
+/// Reject patterns that have both `condition` and shorthand operator fields,
+/// or patterns that have neither (empty pattern object).
 fn v012_pattern_form_ambiguity(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(pattern) = &ind.pattern
-                && pattern.condition.is_some()
-                && pattern.is_shorthand_fields_present()
-            {
-                errors.push(verr(
+            if let Some(pattern) = &ind.pattern {
+                if pattern.condition.is_some() && pattern.is_shorthand_fields_present() {
+                    errors.push(verr(
                         "V-012",
                         format!("attack.indicators[{}].pattern", i),
                         "pattern must not have both 'condition' and shorthand operator fields (contains, regex, etc.)",
                     ));
+                } else if pattern.condition.is_none() && !pattern.is_shorthand_fields_present() {
+                    errors.push(verr(
+                        "V-012",
+                        format!("attack.indicators[{}].pattern", i),
+                        "pattern must have either 'condition' (standard form) or at least one operator field (shorthand form)",
+                    ));
+                }
             }
         }
     }
@@ -445,7 +500,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
             if let Some(pattern) = &ind.pattern {
                 // Check regex in shorthand form
                 if let Some(re) = &pattern.regex
-                    && let Err(e) = Regex::new(re)
+                    && let Err(e) = compile_user_regex(re)
                 {
                     errors.push(verr(
                         "V-013",
@@ -456,7 +511,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
                 // Check regex in condition form
                 if let Some(Condition::Operators(cond)) = &pattern.condition
                     && let Some(re) = &cond.regex
-                    && let Err(e) = Regex::new(re)
+                    && let Err(e) = compile_user_regex(re)
                 {
                     errors.push(verr(
                         "V-013",
@@ -469,6 +524,7 @@ fn v013_regex_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
     // Also check regex in match predicates (triggers and response entries)
     validate_regex_in_phases(doc, errors);
+    validate_regex_in_state_when_predicates(doc, errors);
 }
 
 fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
@@ -480,7 +536,7 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
                 for (key, entry) in pred {
                     if let MatchEntry::Condition(cond) = entry
                         && let Some(re) = &cond.regex
-                        && let Err(e) = Regex::new(re)
+                        && let Err(e) = compile_user_regex(re)
                     {
                         errors.push(verr(
                             "V-013",
@@ -497,10 +553,143 @@ fn validate_regex_in_phases(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
+/// §2.7: state uses Value for diagnostic reporting but validation rejects non-object values.
+fn check_state_is_object(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for_each_state(doc, |state, path| {
+        if !state.is_object() {
+            errors.push(verr(
+                "state-type",
+                path,
+                format!(
+                    "state must be a YAML mapping (object), got {}",
+                    json_type_name(state)
+                ),
+            ));
+        }
+    });
+}
+
+fn json_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+fn for_each_state<F>(doc: &Document, mut visit: F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
+    if let Some(state) = &doc.attack.execution.state {
+        visit(state, "attack.execution.state");
+    }
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(state) = &phase.state {
+                visit(
+                    state,
+                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
+                );
+            }
+        }
+    }
+}
+
+fn for_each_state_response_entry<F>(doc: &Document, mut visit: F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
+    for_each_state(doc, |state, path| {
+        for_each_response_entry_in_state(state, path, &mut visit);
+    });
+}
+
+fn for_each_response_entry_in_state<F>(state: &serde_json::Value, path: &str, visit: &mut F)
+where
+    F: FnMut(&serde_json::Value, &str),
+{
+    let Some(obj) = state.as_object() else {
+        return;
+    };
+
+    if let Some(tools) = obj.get("tools").and_then(|v| v.as_array()) {
+        for (ti, tool) in tools.iter().enumerate() {
+            if let Some(responses) = tool.get("responses").and_then(|v| v.as_array()) {
+                for (ri, entry) in responses.iter().enumerate() {
+                    visit(entry, &format!("{}.tools[{}].responses[{}]", path, ti, ri));
+                }
+            }
+        }
+    }
+
+    if let Some(prompts) = obj.get("prompts").and_then(|v| v.as_array()) {
+        for (pi, prompt) in prompts.iter().enumerate() {
+            if let Some(responses) = prompt.get("responses").and_then(|v| v.as_array()) {
+                for (ri, entry) in responses.iter().enumerate() {
+                    visit(
+                        entry,
+                        &format!("{}.prompts[{}].responses[{}]", path, pi, ri),
+                    );
+                }
+            }
+        }
+    }
+
+    if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in task_responses.iter().enumerate() {
+            visit(entry, &format!("{}.task_responses[{}]", path, ri));
+        }
+    }
+
+    if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in sampling.iter().enumerate() {
+            visit(entry, &format!("{}.sampling_responses[{}]", path, ri));
+        }
+    }
+
+    if let Some(tool_responses) = obj.get("tool_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in tool_responses.iter().enumerate() {
+            visit(entry, &format!("{}.tool_responses[{}]", path, ri));
+        }
+    }
+
+    if let Some(elicitation) = obj.get("elicitation_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in elicitation.iter().enumerate() {
+            visit(entry, &format!("{}.elicitation_responses[{}]", path, ri));
+        }
+    }
+}
+
+fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for_each_state_response_entry(doc, |entry, path| {
+        if let Some(when_val) = entry.get("when")
+            && let Some(pred_map) = when_val.as_object()
+        {
+            for (key, pred_entry) in pred_map {
+                if let Some(entry_obj) = pred_entry.as_object()
+                    && let Some(re_val) = entry_obj.get("regex")
+                    && let Some(re) = re_val.as_str()
+                    && let Err(e) = compile_user_regex(re)
+                {
+                    errors.push(verr(
+                        "V-013",
+                        format!("{}.when.{}.regex", path, key),
+                        format!("invalid regex: {}", e),
+                    ));
+                }
+            }
+        }
+    });
+}
+
 // ─── V-014 ──────────────────────────────────────────────────────────────────
 
 fn v014_cel_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
-    #[cfg(feature = "cel-eval")]
+    #[cfg(feature = "cel-validate")]
     {
         if let Some(indicators) = &doc.attack.indicators {
             for (i, ind) in indicators.iter().enumerate() {
@@ -516,6 +705,11 @@ fn v014_cel_valid(doc: &Document, errors: &mut Vec<ValidationError>) {
                 }
             }
         }
+    }
+
+    #[cfg(not(feature = "cel-validate"))]
+    {
+        let _ = (doc, errors);
     }
 }
 
@@ -554,19 +748,22 @@ fn is_valid_jsonpath_syntax(path: &str) -> bool {
 
 fn v016_template_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     // Check for unclosed {{ in template strings throughout the document
-    // Handle single-phase form directly (collect_actors returns empty for it)
-    if let Some(state) = &doc.attack.execution.state {
-        check_templates_in_value(state, "attack.execution.state", errors);
-    }
-    // We check state values and on_enter action message fields
+    for_each_state(doc, |state, path| {
+        check_templates_in_value(state, path, errors, 0);
+    });
+    // Also check on_enter action message fields
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                check_templates_in_value(
-                    state,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
+            if let Some(actions) = &phase.on_enter {
+                for (ai, action) in actions.iter().enumerate() {
+                    let action_value = serde_json::to_value(action).unwrap_or_default();
+                    check_templates_in_value(
+                        &action_value,
+                        &format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
+                        errors,
+                        0,
+                    );
+                }
             }
         }
     }
@@ -576,19 +773,23 @@ fn check_templates_in_value(
     value: &serde_json::Value,
     path: &str,
     errors: &mut Vec<ValidationError>,
+    depth: usize,
 ) {
+    if depth > MAX_VALUE_DEPTH {
+        return;
+    }
     match value {
         serde_json::Value::String(s) => {
             check_template_string(s, path, errors);
         }
         serde_json::Value::Array(arr) => {
             for (i, v) in arr.iter().enumerate() {
-                check_templates_in_value(v, &format!("{}[{}]", path, i), errors);
+                check_templates_in_value(v, &format!("{}[{}]", path, i), errors, depth + 1);
             }
         }
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                check_templates_in_value(v, &format!("{}.{}", path, k), errors);
+                check_templates_in_value(v, &format!("{}.{}", path, k), errors, depth + 1);
             }
         }
         _ => {}
@@ -650,40 +851,43 @@ fn v017_severity_confidence(doc: &Document, errors: &mut Vec<ValidationError>) {
 
 // ─── V-018 ──────────────────────────────────────────────────────────────────
 
-fn v018_surface_protocol(
-    doc: &Document,
-    errors: &mut Vec<ValidationError>,
-    _warnings: &mut Vec<Diagnostic>,
-) {
+fn v018_surface_protocol(doc: &Document, warnings: &mut Vec<Diagnostic>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            let protocol = ind
-                .protocol
-                .as_deref()
-                .or_else(|| doc.attack.execution.mode.as_deref().map(extract_protocol))
-                .or_else(|| {
-                    // Multi-actor form: infer from single actor's mode
-                    doc.attack.execution.actors.as_ref().and_then(|actors| {
-                        if actors.len() == 1 {
-                            Some(extract_protocol(&actors[0].mode))
-                        } else {
-                            None
-                        }
-                    })
+            let Some(surface) = &ind.surface else {
+                continue; // surface is optional
+            };
+
+            let inferred = infer_execution_protocol(&doc.attack.execution);
+            let protocol = ind.protocol.as_deref().or(inferred.as_deref());
+
+            // For indicators targeting unrecognized protocols, skip surface validation.
+            let is_known_protocol = protocol.is_some_and(|proto| KNOWN_PROTOCOLS.contains(&proto));
+            if !is_known_protocol {
+                continue;
+            }
+
+            let Some(entry) = lookup_surface(surface) else {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "V-018".to_string(),
+                    path: Some(format!("attack.indicators[{}].surface", i)),
+                    message: format!("unknown surface: '{}'", surface),
                 });
-            if let Some(proto) = protocol
-                && KNOWN_PROTOCOLS.contains(&proto)
-                && let Some(entry) = lookup_surface(&ind.surface)
-                && entry.protocol != proto
-            {
-                errors.push(verr(
-                    "V-018",
-                    format!("attack.indicators[{}].surface", i),
-                    format!(
+                continue;
+            };
+            if entry.protocol != protocol.unwrap() {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "V-018".to_string(),
+                    path: Some(format!("attack.indicators[{}].surface", i)),
+                    message: format!(
                         "surface '{}' is for protocol '{}', but indicator targets '{}'",
-                        ind.surface, entry.protocol, proto
+                        surface,
+                        entry.protocol,
+                        protocol.unwrap()
                     ),
-                ));
+                });
             }
         }
     }
@@ -694,15 +898,25 @@ fn v018_surface_protocol(
 fn v019_count_match_require_event(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(trigger) = &phase.trigger
-                && trigger.event.is_none()
-                && (trigger.count.is_some() || trigger.match_predicate.is_some())
-            {
-                errors.push(verr(
-                    "V-019",
-                    format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
-                    "trigger.count and trigger.match require event to be present",
-                ));
+            if let Some(trigger) = &phase.trigger {
+                if trigger.event.is_none()
+                    && (trigger.count.is_some() || trigger.match_predicate.is_some())
+                {
+                    errors.push(verr(
+                        "V-019",
+                        format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
+                        "trigger.count and trigger.match require event to be present",
+                    ));
+                }
+                if let Some(count) = trigger.count
+                    && count < 1
+                {
+                    errors.push(verr(
+                        "V-019",
+                        format!("{}.phases[{}].trigger.count", actor_info.path_prefix, pi),
+                        format!("trigger.count must be >= 1, got {}", count),
+                    ));
+                }
             }
         }
     }
@@ -713,6 +927,15 @@ fn v019_count_match_require_event(doc: &Document, errors: &mut Vec<ValidationErr
 fn v021_target_path_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
+            // Validate indicator-level target (required)
+            if !is_valid_wildcard_dot_path(&ind.target) {
+                errors.push(verr(
+                    "V-021",
+                    format!("attack.indicators[{}].target", i),
+                    format!("invalid wildcard dot-path: '{}'", ind.target),
+                ));
+            }
+
             if let Some(pattern) = &ind.pattern
                 && let Some(target) = &pattern.target
                 && !is_valid_wildcard_dot_path(target)
@@ -737,139 +960,8 @@ fn v021_target_path_syntax(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-/// Validate wildcard dot-path syntax per §5.1.2.
-///
-/// Valid: `tools[*].description`, `content[*]`, `arguments`, `""`, `status.state`,
-///        `2xx-status`, `0foo.bar`
-///
-/// Invalid: `tools[*.description` (missing bracket), `tools..name` (double dot),
-///          `[*]tools` (leading bracket), `tools[*].[*]` (bracket after dot-bracket),
-///          `tools[-1]` (negative index)
-pub fn is_valid_wildcard_dot_path(path: &str) -> bool {
-    if path.is_empty() {
-        return true; // Empty string targets root
-    }
-
-    // Split on dots, but respect [*] as atomic suffix
-    let segments = split_wildcard_path(path);
-    if segments.is_none() {
-        return false;
-    }
-    let segments = segments.unwrap();
-    if segments.is_empty() {
-        return false;
-    }
-    for seg in &segments {
-        if seg.is_empty() {
-            return false; // empty segment (double dot)
-        }
-    }
-    true
-}
-
-/// Split a wildcard dot-path into segments, validating syntax.
-/// Returns None if invalid.
-fn split_wildcard_path(path: &str) -> Option<Vec<String>> {
-    if path.is_empty() {
-        return Some(vec![]);
-    }
-
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = path.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        match chars[i] {
-            '.' => {
-                if current.is_empty() && !segments.is_empty() {
-                    // Double dot or leading dot after segment — check for trailing [*] on prev segment
-                    return None;
-                }
-                if current.is_empty() && segments.is_empty() {
-                    return None; // Leading dot
-                }
-                segments.push(current.clone());
-                current.clear();
-                i += 1;
-            }
-            '[' => {
-                // Must be followed by * or digit(s) and ]
-                if i + 2 < chars.len() && chars[i + 1] == '*' && chars[i + 2] == ']' {
-                    current.push_str("[*]");
-                    i += 3;
-                    // After [*], must be followed by . or end
-                    if i < chars.len() {
-                        if chars[i] == '.' {
-                            segments.push(current.clone());
-                            current.clear();
-                            i += 1;
-                        } else {
-                            return None; // Invalid char after [*]
-                        }
-                    }
-                } else if i + 1 < chars.len() && chars[i + 1] == '-' {
-                    return None; // Negative index
-                } else {
-                    return None; // Invalid bracket content
-                }
-            }
-            c if is_path_segment_char(c) => {
-                current.push(c);
-                i += 1;
-            }
-            _ => {
-                return None; // Invalid character
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        segments.push(current);
-    } else if !segments.is_empty() {
-        // Trailing dot
-        return None;
-    }
-
-    // Validate that the path doesn't start with [
-    if let Some(first) = segments.first()
-        && first.starts_with('[')
-    {
-        return None;
-    }
-
-    Some(segments)
-}
-
-fn is_path_segment_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '-'
-}
-
-/// Validate simple dot-path syntax per §5.1.1.
-/// No wildcards or numeric indices allowed.
-pub fn is_valid_simple_dot_path(path: &str) -> bool {
-    if path.is_empty() {
-        return true; // Empty string targets root
-    }
-
-    let segments: Vec<&str> = path.split('.').collect();
-    if segments.is_empty() {
-        return false;
-    }
-    for seg in &segments {
-        if seg.is_empty() {
-            return false; // double dot or leading/trailing dot
-        }
-        // Each segment must be alphanumeric, underscores, hyphens
-        if !seg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
-            return false;
-        }
-    }
-    true
-}
+// Path validation functions (is_valid_wildcard_dot_path, is_valid_simple_dot_path)
+// are defined in primitives.rs and imported above.
 
 // ─── V-022 ──────────────────────────────────────────────────────────────────
 
@@ -1025,62 +1117,28 @@ fn v027_match_predicate_paths(doc: &Document, errors: &mut Vec<ValidationError>)
     }
 
     // Check response entry `when` predicate keys in state values
-    // This is a deep check into state values which we do best-effort
     check_when_predicates_in_state(doc, errors);
 }
 
 fn check_when_predicates_in_state(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        scan_when_predicates(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                scan_when_predicates(
-                    state,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
-            }
-        }
-    }
-}
-
-/// Walk a state value looking for response entries with `when` predicates
-/// and validate that their keys are valid simple dot-paths.
-fn scan_when_predicates(value: &serde_json::Value, path: &str, errors: &mut Vec<ValidationError>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            // Check if this object has a "when" key whose value is a map (predicate)
-            if let Some(when_val) = map.get("when")
-                && let Some(pred_map) = when_val.as_object()
-            {
-                for key in pred_map.keys() {
-                    if !is_valid_simple_dot_path(key) {
-                        errors.push(verr(
-                            "V-027",
-                            format!("{}.when.{}", path, key),
-                            format!(
-                                "match predicate key must be a valid simple dot-path, got '{}'",
-                                key
-                            ),
-                        ));
-                    }
+    for_each_state_response_entry(doc, |entry, path| {
+        if let Some(when_val) = entry.get("when")
+            && let Some(pred_map) = when_val.as_object()
+        {
+            for key in pred_map.keys() {
+                if !is_valid_simple_dot_path(key) {
+                    errors.push(verr(
+                        "V-027",
+                        format!("{}.when.{}", path, key),
+                        format!(
+                            "match predicate key must be a valid simple dot-path, got '{}'",
+                            key
+                        ),
+                    ));
                 }
             }
-            // Recurse into all values
-            for (k, v) in map {
-                scan_when_predicates(v, &format!("{}.{}", path, k), errors);
-            }
         }
-        serde_json::Value::Array(arr) => {
-            for (i, v) in arr.iter().enumerate() {
-                scan_when_predicates(v, &format!("{}[{}]", path, i), errors);
-            }
-        }
-        _ => {}
-    }
+    });
 }
 
 // ─── V-028 ──────────────────────────────────────────────────────────────────
@@ -1093,12 +1151,26 @@ fn v028_conditional_requiredness(doc: &Document, errors: &mut Vec<ValidationErro
         && exec.actors.is_none()
         && let Some(phases) = &exec.phases
     {
+        let mut has_missing_mode = false;
         for (i, phase) in phases.iter().enumerate() {
             if phase.mode.is_none() {
+                has_missing_mode = true;
                 errors.push(verr(
                     "V-028",
                     format!("attack.execution.phases[{}].mode", i),
                     "phase.mode is required when execution.mode is absent",
+                ));
+            }
+        }
+
+        // When all phases have modes, they must all be the same mode
+        if !has_missing_mode && phases.len() > 1 {
+            let modes: Vec<&str> = phases.iter().filter_map(|p| p.mode.as_deref()).collect();
+            if modes.len() > 1 && !modes.windows(2).all(|w| w[0] == w[1]) {
+                errors.push(verr(
+                    "V-028",
+                    "attack.execution.phases".to_string(),
+                    "all phases must use the same mode when execution.mode is absent and actors is absent",
                 ));
             }
         }
@@ -1124,8 +1196,8 @@ fn v028_conditional_requiredness(doc: &Document, errors: &mut Vec<ValidationErro
 
 fn v029_event_mode_validity(
     doc: &Document,
-    errors: &mut Vec<ValidationError>,
-    _warnings: &mut Vec<Diagnostic>,
+    _errors: &mut Vec<ValidationError>,
+    warnings: &mut Vec<Diagnostic>,
 ) {
     for actor_info in collect_actors(doc) {
         let mode = match actor_info.mode {
@@ -1147,21 +1219,21 @@ fn v029_event_mode_validity(
 
             if let Some(trigger) = &phase.trigger
                 && let Some(event) = &trigger.event
+                && let Some(valid) = is_event_valid_for_mode(event, resolved_mode)
+                && !valid
             {
-                let base_event = strip_event_qualifier(event);
-                if let Some(valid) = is_event_valid_for_mode(base_event, resolved_mode)
-                    && !valid
-                {
-                    errors.push(verr(
-                        "V-029",
-                        format!("{}.phases[{}].trigger.event", actor_info.path_prefix, pi),
-                        format!(
-                            "event '{}' is not valid for mode '{}'",
-                            event, resolved_mode
-                        ),
-                    ));
-                }
-                // If event not in registry, skip (unrecognized binding event)
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "V-029".to_string(),
+                    path: Some(format!(
+                        "{}.phases[{}].trigger.event",
+                        actor_info.path_prefix, pi
+                    )),
+                    message: format!(
+                        "event '{}' is not valid for mode '{}'",
+                        event, resolved_mode
+                    ),
+                });
             }
         }
     }
@@ -1273,26 +1345,24 @@ fn v031_multi_actor_constraints(doc: &Document, errors: &mut Vec<ValidationError
 // ─── V-032 ──────────────────────────────────────────────────────────────────
 
 fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
-    let actor_names: std::collections::HashSet<String> =
-        if let Some(actors) = &doc.attack.execution.actors {
-            actors.iter().map(|a| a.name.clone()).collect()
-        } else {
-            // After normalization, single-phase/multi-phase have actor "default"
-            let mut set = std::collections::HashSet::new();
-            set.insert("default".to_string());
-            set
-        };
-
-    // Scan all template strings in the document for {{actor_name.extractor_name}} references
+    let actor_names = collect_actor_names(doc);
+    for_each_state(doc, |state, path| {
+        check_cross_actor_refs_in_value(state, &actor_names, path, errors, 0);
+    });
+    // Also walk on_enter actions which can contain template strings
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                check_cross_actor_refs_in_value(
-                    state,
-                    &actor_names,
-                    &format!("{}.phases[{}].state", actor_info.path_prefix, pi),
-                    errors,
-                );
+            if let Some(actions) = &phase.on_enter {
+                for (ai, action) in actions.iter().enumerate() {
+                    let action_value = serde_json::to_value(action).unwrap_or_default();
+                    check_cross_actor_refs_in_value(
+                        &action_value,
+                        &actor_names,
+                        &format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
+                        errors,
+                        0,
+                    );
+                }
             }
         }
     }
@@ -1303,7 +1373,11 @@ fn check_cross_actor_refs_in_value(
     actor_names: &std::collections::HashSet<String>,
     path: &str,
     errors: &mut Vec<ValidationError>,
+    depth: usize,
 ) {
+    if depth > MAX_VALUE_DEPTH {
+        return;
+    }
     match value {
         serde_json::Value::String(s) => {
             check_cross_actor_refs_in_string(s, actor_names, path, errors);
@@ -1315,12 +1389,50 @@ fn check_cross_actor_refs_in_value(
                     actor_names,
                     &format!("{}[{}]", path, i),
                     errors,
+                    depth + 1,
                 );
             }
         }
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                check_cross_actor_refs_in_value(v, actor_names, &format!("{}.{}", path, k), errors);
+                // "responses" array is reported as singular "response" per spec
+                if k == "responses" {
+                    if let Some(arr) = v.as_array() {
+                        let child_path = format!("{}.response", path);
+                        for item in arr {
+                            // Flatten response envelope: {content: {content: [...]}} → response.content[N]
+                            if let Some(obj) = item.as_object()
+                                && let Some(content_val) = obj.get("content")
+                                && let Some(inner_obj) = content_val.as_object()
+                                && inner_obj.contains_key("content")
+                            {
+                                check_cross_actor_refs_in_value(
+                                    content_val,
+                                    actor_names,
+                                    &child_path,
+                                    errors,
+                                    depth + 1,
+                                );
+                            } else {
+                                check_cross_actor_refs_in_value(
+                                    item,
+                                    actor_names,
+                                    &child_path,
+                                    errors,
+                                    depth + 1,
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    check_cross_actor_refs_in_value(
+                        v,
+                        actor_names,
+                        &format!("{}.{}", path, k),
+                        errors,
+                        depth + 1,
+                    );
+                }
             }
         }
         _ => {}
@@ -1353,130 +1465,12 @@ fn check_cross_actor_refs_in_string(
     }
 }
 
-// ─── V-033 ──────────────────────────────────────────────────────────────────
+// ─── V-033 (was V-034) ──────────────────────────────────────────────────────
 
-fn v033_content_synthesize_exclusivity(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Check state values for response entries with both content/messages and synthesize
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        let mode = doc.attack.execution.mode.as_deref().unwrap_or_default();
-        check_response_exclusivity(state, mode, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let mode = resolve_mode(doc, actor_info.mode, phase.mode.as_deref());
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_response_exclusivity(state, &mode.unwrap_or_default(), &path, errors);
-            }
-        }
-    }
-}
-
-fn check_response_exclusivity(
-    state: &serde_json::Value,
-    _mode: &str,
-    path: &str,
-    errors: &mut Vec<ValidationError>,
-) {
-    if let Some(obj) = state.as_object() {
-        // MCP tools responses
-        if let Some(tools) = obj.get("tools").and_then(|v| v.as_array()) {
-            for (ti, tool) in tools.iter().enumerate() {
-                // Singular "response" form
-                if let Some(resp) = tool.get("response") {
-                    let has_content = resp.get("content").is_some();
-                    let has_synthesize = resp.get("synthesize").is_some();
-                    if has_content && has_synthesize {
-                        errors.push(verr(
-                            "V-033",
-                            format!("{}.tools[{}].response", path, ti),
-                            "content and synthesize are mutually exclusive",
-                        ));
-                    }
-                }
-                // Plural "responses" form
-                if let Some(responses) = tool.get("responses").and_then(|v| v.as_array()) {
-                    for (ri, resp) in responses.iter().enumerate() {
-                        let has_content = resp.get("content").is_some();
-                        let has_synthesize = resp.get("synthesize").is_some();
-                        if has_content && has_synthesize {
-                            errors.push(verr(
-                                "V-033",
-                                format!("{}.tools[{}].responses[{}]", path, ti, ri),
-                                "content and synthesize are mutually exclusive",
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // MCP prompts responses
-        if let Some(prompts) = obj.get("prompts").and_then(|v| v.as_array()) {
-            for (pi, prompt) in prompts.iter().enumerate() {
-                if let Some(responses) = prompt.get("responses").and_then(|v| v.as_array()) {
-                    for (ri, resp) in responses.iter().enumerate() {
-                        let has_messages = resp.get("messages").is_some();
-                        let has_synthesize = resp.get("synthesize").is_some();
-                        if has_messages && has_synthesize {
-                            errors.push(verr(
-                                "V-033",
-                                format!("{}.prompts[{}].responses[{}]", path, pi, ri),
-                                "messages and synthesize are mutually exclusive",
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // A2A task_responses
-        if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
-            for (ri, resp) in task_responses.iter().enumerate() {
-                let has_messages = resp.get("messages").is_some();
-                let has_artifacts = resp.get("artifacts").is_some();
-                let has_synthesize = resp.get("synthesize").is_some();
-                if (has_messages || has_artifacts) && has_synthesize {
-                    errors.push(verr(
-                        "V-033",
-                        format!("{}.task_responses[{}]", path, ri),
-                        "messages/artifacts and synthesize are mutually exclusive",
-                    ));
-                }
-            }
-        }
-
-        // AG-UI run_agent_input
-        if let Some(rai) = obj.get("run_agent_input") {
-            let has_messages = rai.get("messages").is_some();
-            let has_synthesize = rai.get("synthesize").is_some();
-            if has_messages && has_synthesize {
-                errors.push(verr(
-                    "V-033",
-                    format!("{}.run_agent_input", path),
-                    "messages and synthesize are mutually exclusive",
-                ));
-            }
-        }
-    }
-}
-
-// ─── V-034 ──────────────────────────────────────────────────────────────────
-
-fn v034_catch_all_constraints(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        check_catch_all_in_state(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_catch_all_in_state(state, &path, errors);
-            }
-        }
-    }
+fn v033_catch_all_constraints(doc: &Document, errors: &mut Vec<ValidationError>) {
+    for_each_state(doc, |state, path| {
+        check_catch_all_in_state(state, path, errors);
+    });
 }
 
 fn check_catch_all_in_state(
@@ -1515,6 +1509,25 @@ fn check_catch_all_in_state(
         if let Some(task_responses) = obj.get("task_responses").and_then(|v| v.as_array()) {
             check_catch_all_list(task_responses, &format!("{}.task_responses", path), errors);
         }
+
+        // MCP sampling_responses
+        if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(sampling, &format!("{}.sampling_responses", path), errors);
+        }
+
+        // MCP elicitation_responses
+        if let Some(elicitation) = obj.get("elicitation_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(
+                elicitation,
+                &format!("{}.elicitation_responses", path),
+                errors,
+            );
+        }
+
+        // AG-UI tool_responses
+        if let Some(tool_responses) = obj.get("tool_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(tool_responses, &format!("{}.tool_responses", path), errors);
+        }
     }
 }
 
@@ -1533,7 +1546,7 @@ fn check_catch_all_list(
     }
     if catch_all_count > 1 {
         errors.push(verr(
-            "V-034",
+            "V-033",
             path.to_string(),
             format!(
                 "at most one entry may omit 'when' (catch-all), found {}",
@@ -1543,74 +1556,26 @@ fn check_catch_all_list(
     }
 }
 
-// ─── V-035 ──────────────────────────────────────────────────────────────────
+// ─── V-034 (was V-036) ──────────────────────────────────────────────────────
 
-fn v035_synthesize_prompt(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Handle single-phase form directly
-    if let Some(state) = &doc.attack.execution.state {
-        check_synthesize_prompts(state, "attack.execution.state", errors);
-    }
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(state) = &phase.state {
-                let path = format!("{}.phases[{}].state", actor_info.path_prefix, pi);
-                check_synthesize_prompts(state, &path, errors);
-            }
-        }
-    }
-}
-
-fn check_synthesize_prompts(
-    value: &serde_json::Value,
-    path: &str,
-    errors: &mut Vec<ValidationError>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(synth) = map.get("synthesize")
-                && let Some(synth_obj) = synth.as_object()
-            {
-                match synth_obj.get("prompt") {
-                    Some(serde_json::Value::String(s)) if s.is_empty() => {
-                        errors.push(verr(
-                            "V-035",
-                            format!("{}.synthesize.prompt", path),
-                            "synthesize.prompt must be non-empty",
-                        ));
-                    }
-                    None => {
-                        errors.push(verr(
-                            "V-035",
-                            format!("{}.synthesize.prompt", path),
-                            "synthesize.prompt must be present",
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-            for (k, v) in map {
-                if k != "synthesize" {
-                    check_synthesize_prompts(v, &format!("{}.{}", path, k), errors);
-                }
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for (i, v) in arr.iter().enumerate() {
-                check_synthesize_prompts(v, &format!("{}[{}]", path, i), errors);
-            }
-        }
-        _ => {}
-    }
-}
-
-// ─── V-036 ──────────────────────────────────────────────────────────────────
-
-fn v036_mode_protocol_pattern(
+fn v034_mode_protocol_pattern(
     doc: &Document,
     errors: &mut Vec<ValidationError>,
     warnings: &mut Vec<Diagnostic>,
 ) {
-    // execution.mode pattern is validated by V-005; V-036 handles actor/phase modes.
+    // Check execution.mode pattern (V-036)
+    if let Some(mode) = &doc.attack.execution.mode
+        && !MODE_RE.is_match(mode)
+    {
+        errors.push(verr(
+            "V-034",
+            "attack.execution.mode",
+            format!(
+                "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
+                mode
+            ),
+        ));
+    }
     // Check for W-002 warning on execution.mode (unrecognized but valid pattern)
     if let Some(mode) = &doc.attack.execution.mode
         && MODE_RE.is_match(mode)
@@ -1629,7 +1594,7 @@ fn v036_mode_protocol_pattern(
         for (i, actor) in actors.iter().enumerate() {
             if !MODE_RE.is_match(&actor.mode) {
                 errors.push(verr(
-                    "V-036",
+                    "V-034",
                     format!("attack.execution.actors[{}].mode", i),
                     format!(
                         "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
@@ -1654,7 +1619,7 @@ fn v036_mode_protocol_pattern(
                 && !MODE_RE.is_match(mode)
             {
                 errors.push(verr(
-                    "V-036",
+                    "V-034",
                     format!("{}.phases[{}].mode", actor_info.path_prefix, pi),
                     format!(
                         "mode must match [a-z][a-z0-9_]*_(server|client), got '{}'",
@@ -1671,7 +1636,7 @@ fn v036_mode_protocol_pattern(
             if let Some(protocol) = &ind.protocol {
                 if !PROTOCOL_RE.is_match(protocol) {
                     errors.push(verr(
-                        "V-036",
+                        "V-034",
                         format!("attack.indicators[{}].protocol", i),
                         format!("protocol must match [a-z][a-z0-9_]*, got '{}'", protocol),
                     ));
@@ -1688,14 +1653,14 @@ fn v036_mode_protocol_pattern(
     }
 }
 
-// ─── V-037 ──────────────────────────────────────────────────────────────────
+// ─── V-035 (was V-037) ──────────────────────────────────────────────────────
 
-fn v037_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v035_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(version) = doc.attack.version
         && version < 1
     {
         errors.push(verr(
-            "V-037",
+            "V-035",
             "attack.version",
             format!(
                 "attack.version must be a positive integer (>= 1), got {}",
@@ -1705,69 +1670,36 @@ fn v037_version_positive(doc: &Document, errors: &mut Vec<ValidationError>) {
     }
 }
 
-// ─── V-038 ──────────────────────────────────────────────────────────────────
+// ─── V-036 (was V-038) ──────────────────────────────────────────────────────
 
-fn v038_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
-    // Validate trigger.after durations
+fn v036_trigger_after_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
+    // Validate trigger.after durations by actually parsing them
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(trigger) = &phase.trigger
                 && let Some(after) = &trigger.after
-                && !is_valid_duration(after)
+                && let Err(e) = crate::primitives::parse_duration(after)
             {
                 errors.push(verr(
-                    "V-038",
+                    "V-036",
                     format!("{}.phases[{}].trigger.after", actor_info.path_prefix, pi),
-                    format!("invalid duration: '{}'", after),
+                    format!("invalid duration '{}': {}", after, e),
                 ));
             }
         }
     }
-
-    // Validate attack.grace_period duration
-    if let Some(gp) = &doc.attack.grace_period
-        && !is_valid_duration(gp)
-    {
-        errors.push(verr(
-            "V-038",
-            "attack.grace_period",
-            format!("invalid duration: '{}'", gp),
-        ));
-    }
 }
 
-/// Validate a duration string (shorthand or ISO 8601).
-pub fn is_valid_duration(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    if SHORTHAND_DURATION_RE.is_match(s) {
-        return true;
-    }
-    if ISO_DURATION_RE.is_match(s) {
-        // Must have at least one component
-        let has_day = s.contains('D');
-        let has_t = s.contains('T');
-        let has_time_component = s.contains('H') || s.contains('M') || s.contains('S');
-        // If T is present, it must have at least one time component (reject "P1DT", "PT")
-        if has_t && !has_time_component {
-            return false;
-        }
-        return has_day || has_time_component;
-    }
-    false
-}
+// ─── V-037 (was V-039) ──────────────────────────────────────────────────────
 
-// ─── V-039 ──────────────────────────────────────────────────────────────────
-
-fn v039_extractor_name_pattern(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v037_extractor_name_pattern(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors {
                 for (ei, ext) in extractors.iter().enumerate() {
                     if !SNAKE_CASE_RE.is_match(&ext.name) {
                         errors.push(verr(
-                            "V-039",
+                            "V-037",
                             format!(
                                 "{}.phases[{}].extractors[{}].name",
                                 actor_info.path_prefix, pi, ei
@@ -1784,16 +1716,16 @@ fn v039_extractor_name_pattern(doc: &Document, errors: &mut Vec<ValidationError>
     }
 }
 
-// ─── V-040 ──────────────────────────────────────────────────────────────────
+// ─── V-038 (was V-040) ──────────────────────────────────────────────────────
 
-fn v040_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v038_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors
                 && extractors.is_empty()
             {
                 errors.push(verr(
-                    "V-040",
+                    "V-038",
                     format!("{}.phases[{}].extractors", actor_info.path_prefix, pi),
                     "extractors, when present, must contain at least one entry",
                 ));
@@ -1802,9 +1734,9 @@ fn v040_extractors_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) 
     }
 }
 
-// ─── V-041 ──────────────────────────────────────────────────────────────────
+// ─── V-039 (was V-041) ──────────────────────────────────────────────────────
 
-fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v039_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
             if let Some(expr) = &ind.expression
@@ -1813,7 +1745,7 @@ fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationErro
                 for key in vars.keys() {
                     if !CEL_ID_RE.is_match(key) {
                         errors.push(verr(
-                            "V-041",
+                            "V-039",
                             format!("attack.indicators[{}].expression.variables.{}", i, key),
                             format!(
                                 "expression variable key must be a valid CEL identifier, got '{}'",
@@ -1827,9 +1759,9 @@ fn v041_expression_variable_keys(doc: &Document, errors: &mut Vec<ValidationErro
     }
 }
 
-// ─── V-042 ──────────────────────────────────────────────────────────────────
+// ─── V-040 (was V-042) ──────────────────────────────────────────────────────
 
-fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v040_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(trigger) = &phase.trigger
@@ -1837,7 +1769,7 @@ fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>
                 && trigger.after.is_none()
             {
                 errors.push(verr(
-                    "V-042",
+                    "V-040",
                     format!("{}.phases[{}].trigger", actor_info.path_prefix, pi),
                     "trigger must specify at least one of event or after",
                 ));
@@ -1846,46 +1778,13 @@ fn v042_trigger_event_or_after(doc: &Document, errors: &mut Vec<ValidationError>
     }
 }
 
-// ─── V-043 ──────────────────────────────────────────────────────────────────
+// ─── V-041 (was V-043) ──────────────────────────────────────────────────────
 
-fn v043_binding_specific_action_keys(doc: &Document, errors: &mut Vec<ValidationError>) {
-    for actor_info in collect_actors(doc) {
-        for (pi, phase) in actor_info.phases.iter().enumerate() {
-            if let Some(actions) = &phase.on_enter {
-                for (ai, action) in actions.iter().enumerate() {
-                    let count = match action {
-                        Action::SendNotification {
-                            non_ext_key_count, ..
-                        }
-                        | Action::Log {
-                            non_ext_key_count, ..
-                        }
-                        | Action::SendElicitation {
-                            non_ext_key_count, ..
-                        }
-                        | Action::BindingSpecific {
-                            non_ext_key_count, ..
-                        } => *non_ext_key_count,
-                    };
-                    if count != 1 {
-                        errors.push(verr(
-                            "V-043",
-                            format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
-                            format!(
-                                "action must have exactly one non-extension key, found {}",
-                                count
-                            ),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-}
+// V-041 is enforced at parse time in Action::deserialize.
 
-// ─── V-044 ──────────────────────────────────────────────────────────────────
+// ─── V-042 (was V-044) ──────────────────────────────────────────────────────
 
-fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v042_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(extractors) = &phase.extractors {
@@ -1894,7 +1793,7 @@ fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<Validatio
                         // Check that the selector contains at least one capture group
                         if !has_capture_group(&ext.selector) {
                             errors.push(verr(
-                                "V-044",
+                                "V-042",
                                 format!(
                                     "{}.phases[{}].extractors[{}].selector",
                                     actor_info.path_prefix, pi, ei
@@ -1911,34 +1810,136 @@ fn v044_regex_extractor_capture_group(doc: &Document, errors: &mut Vec<Validatio
 
 /// Check if a regex pattern contains at least one unescaped capture group.
 fn has_capture_group(pattern: &str) -> bool {
-    let bytes = pattern.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2; // skip escaped character
-            continue;
-        }
-        if bytes[i] == b'(' && (i + 1 >= bytes.len() || bytes[i + 1] != b'?') {
-            return true;
-        }
-        i += 1;
-    }
-    false
+    compile_user_regex(pattern)
+        .map(|re| re.captures_len() > 1)
+        .unwrap_or(false)
 }
 
-// ─── V-045 ──────────────────────────────────────────────────────────────────
+// ─── V-043 (was V-045) ──────────────────────────────────────────────────────
 
-fn v045_on_enter_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
+fn v043_on_enter_non_empty(doc: &Document, errors: &mut Vec<ValidationError>) {
     for actor_info in collect_actors(doc) {
         for (pi, phase) in actor_info.phases.iter().enumerate() {
             if let Some(actions) = &phase.on_enter
                 && actions.is_empty()
             {
                 errors.push(verr(
-                    "V-045",
+                    "V-043",
                     format!("{}.phases[{}].on_enter", actor_info.path_prefix, pi),
                     "on_enter, when present, must contain at least one action",
                 ));
+            }
+        }
+    }
+}
+
+// ─── V-044 (was V-046) ──────────────────────────────────────────────────────
+
+fn v044_phase_mode_matches_actor(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(actors) = &doc.attack.execution.actors {
+        for (ai, actor) in actors.iter().enumerate() {
+            for (pi, phase) in actor.phases.iter().enumerate() {
+                if let Some(pm) = &phase.mode
+                    && *pm != actor.mode
+                {
+                    errors.push(verr(
+                        "V-044",
+                        format!("attack.execution.actors[{}].phases[{}].mode", ai, pi),
+                        format!("phase mode '{}' must match actor mode '{}'", pm, actor.mode),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+// ─── V-045 (was V-048) ──────────────────────────────────────────────────────
+
+fn v045_impact_no_duplicates(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(impact) = &doc.attack.impact {
+        let mut seen = std::collections::HashSet::new();
+        for item in impact {
+            if !seen.insert(item) {
+                errors.push(verr(
+                    "V-045",
+                    "attack.impact",
+                    "impact must not contain duplicate values",
+                ));
+                break;
+            }
+        }
+    }
+}
+
+// ─── V-046 (was V-049) ──────────────────────────────────────────────────────
+
+fn v046_grace_period_duration(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(gp) = &doc.attack.grace_period
+        && let Err(e) = crate::primitives::parse_duration(gp)
+    {
+        errors.push(verr(
+            "V-046",
+            "attack.grace_period",
+            format!("invalid duration '{}': {}", gp, e),
+        ));
+    }
+}
+
+// ─── V-047 (was V-050) ──────────────────────────────────────────────────────
+
+fn v047_correlation_requires_indicators(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if doc.attack.correlation.is_some() && doc.attack.indicators.is_none() {
+        errors.push(verr(
+            "V-047",
+            "attack.correlation",
+            "correlation requires indicators to be present",
+        ));
+    }
+}
+
+// ─── V-048: indicator.actor must reference existing actor ────────────────────
+
+fn v048_indicator_actor(doc: &Document, errors: &mut Vec<ValidationError>) {
+    let actor_names = collect_actor_names(doc);
+    if actor_names.is_empty() {
+        return;
+    }
+    if let Some(indicators) = &doc.attack.indicators {
+        for (i, ind) in indicators.iter().enumerate() {
+            if let Some(actor) = &ind.actor
+                && !actor_names.contains(actor.as_str())
+            {
+                errors.push(verr(
+                    "V-048",
+                    format!("attack.indicators[{}].actor", i),
+                    format!("indicator.actor '{}' does not match any actor name", actor),
+                ));
+            }
+        }
+    }
+}
+
+// ─── V-049: indicator.method must match detection key ────────────────────────
+
+fn v049_indicator_method(doc: &Document, errors: &mut Vec<ValidationError>) {
+    if let Some(indicators) = &doc.attack.indicators {
+        for (i, ind) in indicators.iter().enumerate() {
+            if let Some(method) = &ind.method {
+                let has_key = match method {
+                    crate::enums::IndicatorMethod::Pattern => ind.pattern.is_some(),
+                    crate::enums::IndicatorMethod::Expression => ind.expression.is_some(),
+                    crate::enums::IndicatorMethod::Semantic => ind.semantic.is_some(),
+                };
+                if !has_key {
+                    errors.push(verr(
+                        "V-049",
+                        format!("attack.indicators[{}].method", i),
+                        format!(
+                            "indicator.method is '{:?}' but no corresponding detection key is present",
+                            method
+                        ),
+                    ));
+                }
             }
         }
     }
@@ -1960,15 +1961,21 @@ fn w001_oatf_key_ordering(doc: &Document, warnings: &mut Vec<Diagnostic>) {
 // ─── W-004 ──────────────────────────────────────────────────────────────────
 
 fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>) {
-    // Collect actor names so cross-actor references ({{actor.extractor}}) are not flagged
-    let actor_names: std::collections::HashSet<String> =
-        if let Some(actors) = &doc.attack.execution.actors {
-            actors.iter().map(|a| a.name.clone()).collect()
-        } else {
-            let mut set = std::collections::HashSet::new();
-            set.insert("default".to_string());
-            set
-        };
+    let actor_names = collect_actor_names(doc);
+
+    // Single-phase form has no phase-local extractor declarations.
+    if let Some(state) = &doc.attack.execution.state {
+        let declared = std::collections::HashSet::new();
+        if check_undeclared_refs_in_value(state, &declared, &actor_names, 0) {
+            warnings.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "W-004".to_string(),
+                path: None,
+                message: "template references undeclared extractor".to_string(),
+            });
+            return; // Emit once per document
+        }
+    }
 
     for actor_info in collect_actors(doc) {
         for phase in actor_info.phases.iter() {
@@ -1982,7 +1989,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
 
             // Check state for template references
             if let Some(state) = &phase.state {
-                has_undeclared |= check_undeclared_refs_in_value(state, &declared, &actor_names);
+                has_undeclared |= check_undeclared_refs_in_value(state, &declared, &actor_names, 0);
             }
 
             // Check on_enter actions for template references
@@ -1990,7 +1997,7 @@ fn w004_undeclared_extractor_refs(doc: &Document, warnings: &mut Vec<Diagnostic>
                 for action in actions {
                     let action_value = serde_json::to_value(action).unwrap_or_default();
                     has_undeclared |=
-                        check_undeclared_refs_in_value(&action_value, &declared, &actor_names);
+                        check_undeclared_refs_in_value(&action_value, &declared, &actor_names, 0);
                 }
             }
 
@@ -2011,7 +2018,11 @@ fn check_undeclared_refs_in_value(
     value: &serde_json::Value,
     declared: &std::collections::HashSet<String>,
     actor_names: &std::collections::HashSet<String>,
+    depth: usize,
 ) -> bool {
+    if depth > MAX_VALUE_DEPTH {
+        return false;
+    }
     match value {
         serde_json::Value::String(s) => {
             for cap in TEMPLATE_VAR_RE.captures_iter(s) {
@@ -2030,10 +2041,10 @@ fn check_undeclared_refs_in_value(
         }
         serde_json::Value::Array(arr) => arr
             .iter()
-            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names, depth + 1)),
         serde_json::Value::Object(map) => map
             .values()
-            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names)),
+            .any(|v| check_undeclared_refs_in_value(v, declared, actor_names, depth + 1)),
         _ => false,
     }
 }
@@ -2078,6 +2089,81 @@ fn w005_indicator_protocol_mismatch(doc: &Document, warnings: &mut Vec<Diagnosti
                         "indicator protocol '{}' does not match any actor protocol",
                         protocol
                     ),
+                });
+                return; // Emit once per document
+            }
+        }
+    }
+}
+
+// ─── W-006 ──────────────────────────────────────────────────────────────────
+
+fn w006_synthesize_present(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    let states = collect_all_states(doc);
+    for state in states {
+        if value_contains_key(state, "synthesize", 0) {
+            warnings.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "W-006".to_string(),
+                path: None,
+                message: "synthesize block is reserved for a future version".to_string(),
+            });
+            return; // Emit once per document
+        }
+    }
+}
+
+fn collect_all_states(doc: &Document) -> Vec<&Value> {
+    let mut states = Vec::new();
+    if let Some(state) = &doc.attack.execution.state {
+        states.push(state);
+    }
+    if let Some(phases) = &doc.attack.execution.phases {
+        for phase in phases {
+            if let Some(state) = &phase.state {
+                states.push(state);
+            }
+        }
+    }
+    if let Some(actors) = &doc.attack.execution.actors {
+        for actor in actors {
+            for phase in &actor.phases {
+                if let Some(state) = &phase.state {
+                    states.push(state);
+                }
+            }
+        }
+    }
+    states
+}
+
+fn value_contains_key(value: &Value, key: &str, depth: usize) -> bool {
+    if depth > MAX_VALUE_DEPTH {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            if map.contains_key(key) {
+                return true;
+            }
+            map.values().any(|v| value_contains_key(v, key, depth + 1))
+        }
+        Value::Array(arr) => arr.iter().any(|v| value_contains_key(v, key, depth + 1)),
+        _ => false,
+    }
+}
+
+// ─── W-007 ──────────────────────────────────────────────────────────────────
+
+fn w007_semantic_indicator(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    if let Some(indicators) = &doc.attack.indicators {
+        for ind in indicators {
+            if ind.semantic.is_some() {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "W-007".to_string(),
+                    path: None,
+                    message: "indicator uses semantic detection method, which is experimental and model-dependent".to_string(),
                 });
                 return; // Emit once per document
             }

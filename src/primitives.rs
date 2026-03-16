@@ -10,10 +10,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
-// Re-export extract_protocol from event_registry (§5.10)
+/// Compile a user-supplied regex with size limits to prevent ReDoS.
+pub(crate) fn compile_user_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(1 << 20) // 1 MB compiled size
+        .dfa_size_limit(1 << 20) // 1 MB DFA size
+        .build()
+}
+
+// Re-export extract_protocol from event_registry (§5.9)
 pub use crate::event_registry::extract_protocol;
-// Re-export resolve_event_qualifier from event_registry (§7)
-pub use crate::event_registry::resolve_event_qualifier;
 
 // ─── §5.1.1 resolve_simple_path ─────────────────────────────────────────────
 
@@ -92,51 +98,76 @@ struct WildcardSegment {
     wildcard: bool,
 }
 
+/// Check whether a character is valid within a dot-path segment.
+/// Segments may contain ASCII alphanumerics, underscores, and hyphens.
+fn is_path_segment_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+/// Parse a wildcard dot-path into segments, validating syntax and character set.
+///
+/// This is the single shared parser used by both the validator
+/// (`is_valid_wildcard_dot_path`) and the runtime resolver
+/// (`resolve_wildcard_path`). Returns `None` for any syntax error.
 fn split_wildcard_segments(path: &str) -> Option<Vec<WildcardSegment>> {
     let mut segments = Vec::new();
     let mut current = String::new();
     let chars: Vec<char> = path.chars().collect();
     let mut i = 0;
+    let mut expect_segment = true; // tracks whether we need a new segment name next
 
     while i < chars.len() {
         match chars[i] {
             '.' => {
-                if current.is_empty() && segments.is_empty() {
-                    return None; // leading dot
-                }
                 if !current.is_empty() {
                     segments.push(WildcardSegment {
                         name: current.clone(),
                         wildcard: false,
                     });
                     current.clear();
+                } else if !expect_segment {
+                    // Previous token was [*] which already consumed the dot — this is fine
+                } else {
+                    return None; // leading dot or double dot
                 }
+                expect_segment = true;
                 i += 1;
             }
             '[' => {
                 // Must be [*]
                 if i + 2 < chars.len() && chars[i + 1] == '*' && chars[i + 2] == ']' {
+                    // [*] at the start of the path is invalid
+                    if current.is_empty() && segments.is_empty() {
+                        return None;
+                    }
                     segments.push(WildcardSegment {
                         name: current.clone(),
                         wildcard: true,
                     });
                     current.clear();
                     i += 3;
+                    expect_segment = false;
                     // After [*], must be . or end
                     if i < chars.len() {
                         if chars[i] == '.' {
+                            expect_segment = true;
                             i += 1;
                         } else {
                             return None;
                         }
                     }
+                } else if i + 1 < chars.len() && chars[i + 1] == '-' {
+                    return None; // Negative index
                 } else {
-                    return None;
+                    return None; // Invalid bracket content
                 }
             }
-            c => {
+            c if is_path_segment_char(c) => {
                 current.push(c);
                 i += 1;
+            }
+            _ => {
+                return None; // Invalid character
             }
         }
     }
@@ -146,9 +177,41 @@ fn split_wildcard_segments(path: &str) -> Option<Vec<WildcardSegment>> {
             name: current,
             wildcard: false,
         });
+    } else if expect_segment && !segments.is_empty() {
+        // Trailing dot (expect_segment is true but nothing followed)
+        return None;
     }
 
     Some(segments)
+}
+
+/// Validate wildcard dot-path syntax per §5.1.2.
+///
+/// Accepts paths like `tools[*].name`, `content`, or `""` (root).
+/// Rejects invalid characters, leading/trailing dots, double dots,
+/// numeric indices, and leading wildcards.
+pub fn is_valid_wildcard_dot_path(path: &str) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    split_wildcard_segments(path).is_some()
+}
+
+/// Validate simple dot-path syntax per §5.1.1.
+/// No wildcards or numeric indices allowed.
+pub fn is_valid_simple_dot_path(path: &str) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    for seg in path.split('.') {
+        if seg.is_empty() {
+            return false;
+        }
+        if !seg.chars().all(is_path_segment_char) {
+            return false;
+        }
+    }
+    true
 }
 
 // ─── §5.2 parse_duration ────────────────────────────────────────────────────
@@ -322,51 +385,40 @@ pub fn evaluate_condition(condition: &Condition, value: &Value) -> bool {
 /// Evaluate a MatchCondition (set of operators) against a value with AND logic.
 pub fn evaluate_match_condition(cond: &MatchCondition, value: &Value) -> bool {
     // Each present operator must pass (AND logic)
-    if let Some(ref s) = cond.contains {
-        match value.as_str() {
-            Some(v) => {
-                if !v.contains(s.as_str()) {
+    // Coerce value to string once for all string operators.
+    // For strings this is a clone; for numbers/bools/null/objects/arrays it
+    // produces a canonical text representation (e.g. "42", "true", compact JSON).
+    let need_string_op = cond.contains.is_some()
+        || cond.starts_with.is_some()
+        || cond.ends_with.is_some()
+        || cond.regex.is_some();
+
+    if need_string_op {
+        let text = value_to_string(value);
+
+        if let Some(ref s) = cond.contains
+            && !text.contains(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref s) = cond.starts_with
+            && !text.starts_with(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref s) = cond.ends_with
+            && !text.ends_with(s.as_str())
+        {
+            return false;
+        }
+        if let Some(ref pattern) = cond.regex {
+            if let Ok(re) = compile_user_regex(pattern) {
+                if !re.is_match(&text) {
                     return false;
                 }
+            } else {
+                return false; // invalid regex → false
             }
-            None => return false,
-        }
-    }
-
-    if let Some(ref s) = cond.starts_with {
-        match value.as_str() {
-            Some(v) => {
-                if !v.starts_with(s.as_str()) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
-    }
-
-    if let Some(ref s) = cond.ends_with {
-        match value.as_str() {
-            Some(v) => {
-                if !v.ends_with(s.as_str()) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
-    }
-
-    if let Some(ref pattern) = cond.regex {
-        match value.as_str() {
-            Some(v) => {
-                if let Ok(re) = Regex::new(pattern) {
-                    if !re.is_match(v) {
-                        return false;
-                    }
-                } else {
-                    return false; // invalid regex → false
-                }
-            }
-            None => return false,
         }
     }
 
@@ -487,11 +539,9 @@ pub fn evaluate_predicate(predicate: &MatchPredicate, value: &Value) -> bool {
                         exists: Some(true), ..
                     } => {
                         // exists: true — path MUST resolve
-                        if resolved.is_none() {
+                        let Some(val) = &resolved else {
                             return false;
-                        }
-                        // Evaluate remaining operators
-                        let val = resolved.as_ref().unwrap();
+                        };
                         if !evaluate_match_condition_excluding_exists(cond, val) {
                             return false;
                         }
@@ -618,8 +668,39 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        // Objects and arrays serialize to compact JSON
-        _ => serde_json::to_string(v).unwrap_or_default(),
+        // Objects and arrays serialize to compact JSON with keys sorted
+        // lexicographically per spec §5.3.
+        _ => {
+            serde_json::to_string(&sort_keys(v)).unwrap_or_else(|_| "<unserializable>".to_string())
+        }
+    }
+}
+
+const MAX_VALUE_DEPTH: usize = 128;
+
+/// Recursively sort object keys lexicographically for canonical JSON output.
+fn sort_keys(v: &Value) -> Value {
+    sort_keys_inner(v, 0)
+}
+
+fn sort_keys_inner(v: &Value, depth: usize) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return v.clone();
+    }
+    match v {
+        Value::Object(map) => {
+            let mut sorted: serde_json::Map<String, Value> = serde_json::Map::new();
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            for k in keys {
+                sorted.insert(k.clone(), sort_keys_inner(&map[k], depth + 1));
+            }
+            Value::Object(sorted)
+        }
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|v| sort_keys_inner(v, depth + 1)).collect())
+        }
+        _ => v.clone(),
     }
 }
 
@@ -645,7 +726,7 @@ pub fn interpolate_value(
     response: Option<&Value>,
 ) -> (Value, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
-    let result = interpolate_value_inner(value, extractors, request, response, &mut diagnostics);
+    let result = interpolate_value_inner(value, extractors, request, response, &mut diagnostics, 0);
     (result, diagnostics)
 }
 
@@ -655,7 +736,11 @@ fn interpolate_value_inner(
     request: Option<&Value>,
     response: Option<&Value>,
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Value {
+    if depth > MAX_VALUE_DEPTH {
+        return value.clone();
+    }
     match value {
         Value::String(s) => {
             if s.contains("{{") {
@@ -670,8 +755,14 @@ fn interpolate_value_inner(
             let new_map: serde_json::Map<String, Value> = map
                 .iter()
                 .map(|(k, v)| {
-                    let new_v =
-                        interpolate_value_inner(v, extractors, request, response, diagnostics);
+                    let new_v = interpolate_value_inner(
+                        v,
+                        extractors,
+                        request,
+                        response,
+                        diagnostics,
+                        depth + 1,
+                    );
                     (k.clone(), new_v)
                 })
                 .collect();
@@ -680,7 +771,16 @@ fn interpolate_value_inner(
         Value::Array(arr) => {
             let new_arr: Vec<Value> = arr
                 .iter()
-                .map(|v| interpolate_value_inner(v, extractors, request, response, diagnostics))
+                .map(|v| {
+                    interpolate_value_inner(
+                        v,
+                        extractors,
+                        request,
+                        response,
+                        diagnostics,
+                        depth + 1,
+                    )
+                })
                 .collect();
             Value::Array(new_arr)
         }
@@ -723,24 +823,24 @@ fn evaluate_extractor_jsonpath(selector: &str, message: &Value) -> Option<String
     let path = serde_json_path::JsonPath::parse(selector).ok()?;
     let node_list = path.query(message);
     let first = node_list.first()?;
+    Some(extractor_value_to_string(first))
+}
 
-    // Serialize: scalars to their natural representation, non-scalars to compact JSON
-    match first {
-        Value::String(s) => Some(s.clone()),
-        Value::Null => Some("null".to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        _ => Some(serde_json::to_string(first).unwrap_or_default()),
+/// Like `value_to_string` but without key sorting — preserves insertion order
+/// for extractors where the spec doesn't mandate canonical key ordering.
+fn extractor_value_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => serde_json::to_string(v).unwrap_or_else(|_| "<unserializable>".to_string()),
     }
 }
 
 fn evaluate_extractor_regex(selector: &str, message: &Value) -> Option<String> {
-    let text = match message {
-        Value::String(s) => s.clone(),
-        _ => serde_json::to_string(message).unwrap_or_default(),
-    };
-
-    let re = Regex::new(selector).ok()?;
+    let text = extractor_value_to_string(message);
+    let re = compile_user_regex(selector).ok()?;
     let caps = re.captures(&text)?;
 
     // Must have at least one capture group; return first group
@@ -784,18 +884,14 @@ pub fn select_response<'a>(
 
 /// Evaluates whether a trigger condition is satisfied for phase advancement.
 ///
-/// `protocol` identifies the wire protocol (e.g. `"mcp"`, `"a2a"`, `"ag_ui"`)
-/// and is used to key the qualifier resolution registry.
-///
 /// `state` is a mutable reference to per-trigger state that persists across
 /// calls. The SDK increments `state.event_count` only when the incoming event
-/// fully matches (base type + qualifier + predicate).
+/// fully matches (event type + predicate).
 pub fn evaluate_trigger(
     trigger: &Trigger,
     event: Option<&ProtocolEvent>,
     elapsed: Duration,
     state: &mut TriggerState,
-    protocol: &str,
 ) -> TriggerResult {
     // 1. Check timeout
     if let Some(after) = &trigger.after
@@ -809,35 +905,21 @@ pub fn evaluate_trigger(
 
     // 2. Check event match
     if let (Some(trigger_event), Some(ev)) = (&trigger.event, event) {
-        let (trigger_base, trigger_qualifier) = parse_event_qualifier(trigger_event);
-        let (event_base, _) = parse_event_qualifier(&ev.event_type);
-
-        if trigger_base != event_base {
+        if trigger_event != &ev.event_type {
             return TriggerResult::NotAdvanced;
         }
 
-        // 3. Qualifier comparison (if trigger specifies one)
-        if let Some(tq) = trigger_qualifier {
-            // §5.8 step 2c-i: event.qualifier first, then content-based resolution
-            let resolved = ev.qualifier.clone().or_else(|| {
-                crate::event_registry::resolve_event_qualifier(protocol, event_base, &ev.content)
-            });
-            match resolved {
-                Some(ref eq) if eq == tq => {} // match
-                _ => return TriggerResult::NotAdvanced,
-            }
-        }
-
-        // 4. Check match predicate if present
+        // 3. Check match predicate if present
         if let Some(predicate) = &trigger.match_predicate
             && !evaluate_predicate(predicate, &ev.content)
         {
             return TriggerResult::NotAdvanced;
         }
 
-        // 5. Full match — increment count, then check threshold
+        // 4. Full match — increment count, then check threshold
         state.event_count += 1;
-        let required_count = trigger.count.unwrap_or(1) as u64;
+        // Defensive clamp for callers that bypass validate(): count must be >= 1.
+        let required_count = trigger.count.unwrap_or(1).max(1) as u64;
         if state.event_count >= required_count {
             return TriggerResult::Advanced {
                 reason: AdvanceReason::EventMatched,
@@ -848,19 +930,7 @@ pub fn evaluate_trigger(
     TriggerResult::NotAdvanced
 }
 
-// ─── §5.9 parse_event_qualifier ─────────────────────────────────────────────
-
-/// Splits an event type string on the first `:` separator.
-///
-/// Returns `(base_event, optional_qualifier)`.
-pub fn parse_event_qualifier(event_string: &str) -> (&str, Option<&str>) {
-    match event_string.find(':') {
-        Some(pos) => (&event_string[..pos], Some(&event_string[pos + 1..])),
-        None => (event_string, None),
-    }
-}
-
-// ─── §5.11 compute_effective_state ──────────────────────────────────────────
+// ─── §5.10 compute_effective_state ──────────────────────────────────────────
 
 /// Computes the effective state at a given phase by applying state inheritance.
 ///

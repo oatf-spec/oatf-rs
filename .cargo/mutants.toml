@@ -38,4 +38,8 @@ exclude_re = [
     # Extension key validation in parse — covered by parse conformance.
     "validate_extension_keys",
     "check_extensions",
+
+    # Semantic score tracking: `>` vs `>=` only affects tie-breaking order
+    # for equal scores — no observable behavior difference.
+    "replace > with >= in evaluate_semantic",
 ]
