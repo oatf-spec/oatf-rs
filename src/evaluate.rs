@@ -357,7 +357,7 @@ pub fn evaluate_expression(
     let mut context = serde_json::Map::new();
     context.insert("message".to_string(), message.clone());
 
-    // Resolve variables
+    // Resolve variables — unresolvable paths bind as null per EVAL-CEL-09
     if let Some(vars) = &expression.variables {
         for (name, path) in vars {
             let resolved = resolve_simple_path(path, message).unwrap_or(Value::Null);

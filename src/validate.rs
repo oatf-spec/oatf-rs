@@ -468,19 +468,25 @@ fn v012_exactly_one_detection_key(doc: &Document, errors: &mut Vec<ValidationErr
     }
 }
 
-/// Reject patterns that have both `condition` and shorthand operator fields.
+/// Reject patterns that have both `condition` and shorthand operator fields,
+/// or patterns that have neither (empty pattern object).
 fn v012_pattern_form_ambiguity(doc: &Document, errors: &mut Vec<ValidationError>) {
     if let Some(indicators) = &doc.attack.indicators {
         for (i, ind) in indicators.iter().enumerate() {
-            if let Some(pattern) = &ind.pattern
-                && pattern.condition.is_some()
-                && pattern.is_shorthand_fields_present()
-            {
-                errors.push(verr(
+            if let Some(pattern) = &ind.pattern {
+                if pattern.condition.is_some() && pattern.is_shorthand_fields_present() {
+                    errors.push(verr(
                         "V-012",
                         format!("attack.indicators[{}].pattern", i),
                         "pattern must not have both 'condition' and shorthand operator fields (contains, regex, etc.)",
                     ));
+                } else if pattern.condition.is_none() && !pattern.is_shorthand_fields_present() {
+                    errors.push(verr(
+                        "V-012",
+                        format!("attack.indicators[{}].pattern", i),
+                        "pattern must have either 'condition' (standard form) or at least one operator field (shorthand form)",
+                    ));
+                }
             }
         }
     }
@@ -642,6 +648,12 @@ where
     if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
         for (ri, entry) in sampling.iter().enumerate() {
             visit(entry, &format!("{}.sampling_responses[{}]", path, ri));
+        }
+    }
+
+    if let Some(tool_responses) = obj.get("tool_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in tool_responses.iter().enumerate() {
+            visit(entry, &format!("{}.tool_responses[{}]", path, ri));
         }
     }
 }
@@ -1331,6 +1343,23 @@ fn v032_cross_actor_refs(doc: &Document, errors: &mut Vec<ValidationError>) {
     for_each_state(doc, |state, path| {
         check_cross_actor_refs_in_value(state, &actor_names, path, errors, 0);
     });
+    // Also walk on_enter actions which can contain template strings
+    for actor_info in collect_actors(doc) {
+        for (pi, phase) in actor_info.phases.iter().enumerate() {
+            if let Some(actions) = &phase.on_enter {
+                for (ai, action) in actions.iter().enumerate() {
+                    let action_value = serde_json::to_value(action).unwrap_or_default();
+                    check_cross_actor_refs_in_value(
+                        &action_value,
+                        &actor_names,
+                        &format!("{}.phases[{}].on_enter[{}]", actor_info.path_prefix, pi, ai),
+                        errors,
+                        0,
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn check_cross_actor_refs_in_value(
