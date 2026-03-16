@@ -32,12 +32,12 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-003" => "§11.1.3",
         "V-004" => "§11.1.4",
         "V-005" => "§11.1.5",
-        "V-006" => "§11.1.6",
-        "V-007" => "§11.1.8",
-        "V-008" => "§11.1.8",
-        "V-009" => "§11.1.8",
+        "V-006" => "§11.1.9",
+        "V-007" => "§11.1.7",
+        "V-008" => "§11.1.7",
+        "V-009" => "§11.1.7",
         "V-010" => "§11.1.10",
-        "V-011" => "§11.1.8",
+        "V-011" => "§11.1.7",
         "V-012" => "§11.1.11",
         "V-013" => "§6.2",
         "V-014" => "§6.3",
@@ -64,7 +64,7 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-035" => "§4.2",
         "V-036" => "§5.2",
         "V-037" => "§5.5",
-        "V-038" => "§11.1.8",
+        "V-038" => "§11.1.7",
         "V-039" => "§11.1.15",
         "V-040" => "§5.3",
         "V-041" => "§11.1.16",
@@ -161,6 +161,8 @@ pub fn validate(doc: &Document) -> ValidationResult {
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
+    w006_synthesize_present(doc, &mut warnings);
+    w007_semantic_indicator(doc, &mut warnings);
 
     ValidationResult { errors, warnings }
 }
@@ -2038,6 +2040,81 @@ fn w005_indicator_protocol_mismatch(doc: &Document, warnings: &mut Vec<Diagnosti
                         "indicator protocol '{}' does not match any actor protocol",
                         protocol
                     ),
+                });
+                return; // Emit once per document
+            }
+        }
+    }
+}
+
+// ─── W-006 ──────────────────────────────────────────────────────────────────
+
+fn w006_synthesize_present(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    let states = collect_all_states(doc);
+    for state in states {
+        if value_contains_key(state, "synthesize", 0) {
+            warnings.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "W-006".to_string(),
+                path: None,
+                message: "synthesize block is reserved for a future version".to_string(),
+            });
+            return; // Emit once per document
+        }
+    }
+}
+
+fn collect_all_states(doc: &Document) -> Vec<&Value> {
+    let mut states = Vec::new();
+    if let Some(state) = &doc.attack.execution.state {
+        states.push(state);
+    }
+    if let Some(phases) = &doc.attack.execution.phases {
+        for phase in phases {
+            if let Some(state) = &phase.state {
+                states.push(state);
+            }
+        }
+    }
+    if let Some(actors) = &doc.attack.execution.actors {
+        for actor in actors {
+            for phase in &actor.phases {
+                if let Some(state) = &phase.state {
+                    states.push(state);
+                }
+            }
+        }
+    }
+    states
+}
+
+fn value_contains_key(value: &Value, key: &str, depth: usize) -> bool {
+    if depth > MAX_VALUE_DEPTH {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            if map.contains_key(key) {
+                return true;
+            }
+            map.values().any(|v| value_contains_key(v, key, depth + 1))
+        }
+        Value::Array(arr) => arr.iter().any(|v| value_contains_key(v, key, depth + 1)),
+        _ => false,
+    }
+}
+
+// ─── W-007 ──────────────────────────────────────────────────────────────────
+
+fn w007_semantic_indicator(doc: &Document, warnings: &mut Vec<Diagnostic>) {
+    if let Some(indicators) = &doc.attack.indicators {
+        for ind in indicators {
+            if ind.semantic.is_some() {
+                warnings.push(Diagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "W-007".to_string(),
+                    path: None,
+                    message: "indicator uses semantic detection method, which is experimental and model-dependent".to_string(),
                 });
                 return; // Emit once per document
             }

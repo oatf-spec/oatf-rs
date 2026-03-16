@@ -717,12 +717,7 @@ fn evaluate_trigger_suite() {
             event_count: case.input.state.event_count,
         };
 
-        let result = primitives::evaluate_trigger(
-            &trigger,
-            event.as_ref(),
-            elapsed,
-            &mut state,
-        );
+        let result = primitives::evaluate_trigger(&trigger, event.as_ref(), elapsed, &mut state);
 
         let (result_str, reason_str) = match &result {
             TriggerResult::Advanced { reason } => {

@@ -18,12 +18,7 @@ fn evaluate_trigger_clamps_negative_count_to_one() {
     };
     let mut state = TriggerState::default();
 
-    let result = evaluate_trigger(
-        &trigger,
-        Some(&event),
-        Duration::from_secs(0),
-        &mut state,
-    );
+    let result = evaluate_trigger(&trigger, Some(&event), Duration::from_secs(0), &mut state);
 
     match result {
         TriggerResult::Advanced { reason } => assert_eq!(reason, AdvanceReason::EventMatched),
@@ -46,12 +41,7 @@ fn evaluate_trigger_clamps_zero_count_to_one() {
     };
     let mut state = TriggerState::default();
 
-    let result = evaluate_trigger(
-        &trigger,
-        Some(&event),
-        Duration::from_secs(0),
-        &mut state,
-    );
+    let result = evaluate_trigger(&trigger, Some(&event), Duration::from_secs(0), &mut state);
 
     match result {
         TriggerResult::Advanced { reason } => assert_eq!(reason, AdvanceReason::EventMatched),

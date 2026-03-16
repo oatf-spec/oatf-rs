@@ -1,4 +1,4 @@
-//! Idempotent document normalization (N-001 through N-007).
+//! Idempotent document normalization (N-001 through N-008).
 //!
 //! Converts all execution forms to canonical multi-actor form, expands defaults,
 //! and resolves shorthand patterns. `normalize(normalize(doc)) == normalize(doc)`.
@@ -31,6 +31,9 @@ pub fn normalize(mut doc: Document) -> Document {
 
     // N-005: Expand pattern shorthand to standard form
     n005_expand_pattern_shorthand(&mut doc);
+
+    // N-008: Normalize classification tags
+    n008_normalize_tags(&mut doc);
 
     doc
 }
@@ -199,6 +202,18 @@ fn n005_expand_pattern_shorthand(doc: &mut Document) {
                 };
                 pattern.condition = Some(Condition::Operators(cond));
             }
+        }
+    }
+}
+
+// ─── N-008: Normalize classification tags ─────────────────────────────────────
+
+fn n008_normalize_tags(doc: &mut Document) {
+    if let Some(ref mut classification) = doc.attack.classification
+        && let Some(ref mut tags) = classification.tags
+    {
+        for tag in tags.iter_mut() {
+            *tag = tag.to_lowercase().replace(['_', ' '], "-");
         }
     }
 }
