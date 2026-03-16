@@ -198,7 +198,7 @@ fn n005_expand_pattern_shorthand(doc: &mut Document) {
                     lt: pattern.lt.take(),
                     gte: pattern.gte.take(),
                     lte: pattern.lte.take(),
-                    exists: None,
+                    exists: pattern.exists.take(),
                 };
                 pattern.condition = Some(Condition::Operators(cond));
             }
