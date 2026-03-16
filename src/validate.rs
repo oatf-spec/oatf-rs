@@ -656,6 +656,12 @@ where
             visit(entry, &format!("{}.tool_responses[{}]", path, ri));
         }
     }
+
+    if let Some(elicitation) = obj.get("elicitation_responses").and_then(|v| v.as_array()) {
+        for (ri, entry) in elicitation.iter().enumerate() {
+            visit(entry, &format!("{}.elicitation_responses[{}]", path, ri));
+        }
+    }
 }
 
 fn validate_regex_in_state_when_predicates(doc: &Document, errors: &mut Vec<ValidationError>) {
@@ -1507,6 +1513,20 @@ fn check_catch_all_in_state(
         // MCP sampling_responses
         if let Some(sampling) = obj.get("sampling_responses").and_then(|v| v.as_array()) {
             check_catch_all_list(sampling, &format!("{}.sampling_responses", path), errors);
+        }
+
+        // MCP elicitation_responses
+        if let Some(elicitation) = obj.get("elicitation_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(
+                elicitation,
+                &format!("{}.elicitation_responses", path),
+                errors,
+            );
+        }
+
+        // AG-UI tool_responses
+        if let Some(tool_responses) = obj.get("tool_responses").and_then(|v| v.as_array()) {
+            check_catch_all_list(tool_responses, &format!("{}.tool_responses", path), errors);
         }
     }
 }
