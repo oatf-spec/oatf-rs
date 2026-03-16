@@ -42,14 +42,14 @@ To disable all CEL support (reduces dependencies):
 
 ```toml
 [dependencies]
-oatf = { version = "0.1", default-features = false }
+oatf = { version = "0.3", default-features = false }
 ```
 
 To keep CEL syntax validation but provide your own evaluator:
 
 ```toml
 [dependencies]
-oatf = { version = "0.1", default-features = false, features = ["cel-validate"] }
+oatf = { version = "0.3", default-features = false, features = ["cel-validate"] }
 ```
 
 ## Pipeline
@@ -60,23 +60,19 @@ parse(yaml) → Document → validate(doc) → ValidationResult
 ```
 
 - **parse** — YAML → `Document`. Rejects anchors, aliases, merge keys, multi-document streams.
-- **validate** — 45 conformance rules (V-001–V-045) returning all errors and warnings.
+- **validate** — 49 conformance rules (V-001–V-049) returning all errors and warnings.
 - **normalize** — 8 idempotent steps converting to canonical multi-actor form.
 - **serialize** — `Document` → YAML.
 - **load** — Convenience: parse → validate → normalize.
 - **evaluate** — Pattern, CEL expression, and semantic indicator evaluation with verdict computation.
-- **primitives** — 12 execution primitives (path resolution, duration parsing, condition evaluation, etc.).
+- **primitives** — 13 execution primitives (path resolution, duration parsing, condition evaluation, etc.).
 
 ## Conformance
 
 This crate passes the full [OATF conformance suite](https://github.com/oatf-spec/spec/tree/main/conformance)
-(314 test cases across parse, validate, normalize, evaluate, verdict, roundtrip, and primitives).
+(407 test cases across parse, validate, normalize, evaluate, verdict, roundtrip, and primitives).
 
 ## Minimum Supported Rust Version
 
 The MSRV is **1.88.0** (edition 2024). It is tested in CI and will be bumped
 as a minor version change.
-
-## License
-
-Apache-2.0
