@@ -700,8 +700,6 @@ pub struct PatternMatch {
     pub gte: Option<f64>,
     /// Shorthand: less-than-or-equal numeric comparison.
     pub lte: Option<f64>,
-    /// Shorthand: field presence check.
-    pub exists: Option<bool>,
 }
 
 impl PatternMatch {
@@ -721,7 +719,6 @@ impl PatternMatch {
             || self.lt.is_some()
             || self.gte.is_some()
             || self.lte.is_some()
-            || self.exists.is_some()
     }
 }
 
@@ -762,9 +759,6 @@ impl Serialize for PatternMatch {
         }
         if let Some(v) = self.lte {
             map.serialize_entry("lte", &v)?;
-        }
-        if let Some(v) = self.exists {
-            map.serialize_entry("exists", &v)?;
         }
         map.end()
     }
@@ -832,16 +826,6 @@ impl<'de> Deserialize<'de> for PatternMatch {
         let lt = parse_opt_number("lt")?;
         let gte = parse_opt_number("gte")?;
         let lte = parse_opt_number("lte")?;
-        let exists = match map.get("exists") {
-            None | Some(Value::Null) => None,
-            Some(Value::Bool(b)) => Some(*b),
-            Some(v) => {
-                return Err(serde::de::Error::custom(format!(
-                    "pattern.exists must be a boolean, got {}",
-                    v
-                )));
-            }
-        };
 
         Ok(PatternMatch {
             target,
@@ -855,7 +839,6 @@ impl<'de> Deserialize<'de> for PatternMatch {
             lt,
             gte,
             lte,
-            exists,
         })
     }
 }

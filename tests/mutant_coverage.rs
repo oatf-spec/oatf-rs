@@ -448,7 +448,6 @@ fn evaluate_indicator_errors_on_missing_id() {
             lt: None,
             gte: None,
             lte: None,
-            exists: None,
             condition: Some(oatf::types::Condition::Equality(json!("test"))),
         }),
         expression: None,
@@ -494,7 +493,6 @@ fn pattern_exists_false_matches_when_target_absent() {
         lt: None,
         gte: None,
         lte: None,
-        exists: None,
         condition: Some(Condition::Operators(MatchCondition {
             contains: None,
             starts_with: None,
@@ -533,7 +531,6 @@ fn pattern_exists_false_does_not_match_when_target_present() {
         lt: None,
         gte: None,
         lte: None,
-        exists: None,
         condition: Some(Condition::Operators(MatchCondition {
             contains: None,
             starts_with: None,
@@ -572,7 +569,6 @@ fn pattern_exists_false_with_other_ops_always_false() {
         lt: None,
         gte: None,
         lte: None,
-        exists: None,
         condition: Some(Condition::Operators(MatchCondition {
             contains: Some("foo".to_string()),
             starts_with: None,
