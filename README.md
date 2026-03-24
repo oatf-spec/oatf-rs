@@ -42,14 +42,14 @@ To disable all CEL support (reduces dependencies):
 
 ```toml
 [dependencies]
-oatf = { version = "0.3", default-features = false }
+oatf = { version = "0.4", default-features = false }
 ```
 
 To keep CEL syntax validation but provide your own evaluator:
 
 ```toml
 [dependencies]
-oatf = { version = "0.3", default-features = false, features = ["cel-validate"] }
+oatf = { version = "0.4", default-features = false, features = ["cel-validate"] }
 ```
 
 ## Pipeline
@@ -60,7 +60,7 @@ parse(yaml) → Document → validate(doc) → ValidationResult
 ```
 
 - **parse** — YAML → `Document`. Rejects anchors, aliases, merge keys, multi-document streams.
-- **validate** — 49 conformance rules (V-001–V-049) returning all errors and warnings.
+- **validate** — 50 conformance rules (V-001–V-050) returning all errors and warnings.
 - **normalize** — 8 idempotent steps converting to canonical multi-actor form.
 - **serialize** — `Document` → YAML.
 - **load** — Convenience: parse → validate → normalize.
@@ -70,7 +70,7 @@ parse(yaml) → Document → validate(doc) → ValidationResult
 ## Conformance
 
 This crate passes the full [OATF conformance suite](https://github.com/oatf-spec/spec/tree/main/conformance)
-(407 test cases across parse, validate, normalize, evaluate, verdict, roundtrip, and primitives).
+(442 test cases across parse, validate, normalize, evaluate, verdict, roundtrip, and primitives).
 
 ## Minimum Supported Rust Version
 
