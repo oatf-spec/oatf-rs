@@ -1,4 +1,4 @@
-//! Document validation against conformance rules V-001 through V-049.
+//! Document validation against conformance rules V-001 through V-050.
 //!
 //! Returns **all** errors and warnings, not just the first. Validation does not
 //! modify the document.
@@ -76,6 +76,7 @@ fn spec_ref_for_rule(rule: &str) -> &'static str {
         "V-047" => "§2.3a",
         "V-048" => "§6.1",
         "V-049" => "§6.1",
+        "V-050" => "§6.5",
         _ => "",
     }
 }
@@ -102,7 +103,7 @@ static CEL_ID_RE: LazyLock<Regex> =
 
 static PROTOCOL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").unwrap());
 
-/// Validate a parsed document against all conformance rules (V-001..V-049).
+/// Validate a parsed document against all conformance rules (V-001..V-050).
 /// Returns a ValidationResult containing all errors and warnings found.
 pub fn validate(doc: &Document) -> ValidationResult {
     let mut errors = Vec::new();
@@ -158,6 +159,7 @@ pub fn validate(doc: &Document) -> ValidationResult {
     v047_correlation_requires_indicators(doc, &mut errors); // was V-050
     v048_indicator_actor(doc, &mut errors); // new
     v049_indicator_method(doc, &mut errors); // new
+    v050_indicator_tier(doc, &mut errors);
 
     w004_undeclared_extractor_refs(doc, &mut warnings);
     w005_indicator_protocol_mismatch(doc, &mut warnings);
@@ -1940,6 +1942,25 @@ fn v049_indicator_method(doc: &Document, errors: &mut Vec<ValidationError>) {
                         ),
                     ));
                 }
+            }
+        }
+    }
+}
+
+// ─── V-050 ──────────────────────────────────────────────────────────────────
+
+fn v050_indicator_tier(doc: &Document, errors: &mut Vec<ValidationError>) {
+    static VALID_TIERS: &[&str] = &["ingested", "local_action", "boundary_breach"];
+    if let Some(indicators) = &doc.attack.indicators {
+        for (i, ind) in indicators.iter().enumerate() {
+            if let Some(tier) = &ind.tier
+                && !VALID_TIERS.contains(&tier.as_str())
+            {
+                errors.push(verr(
+                    "V-050",
+                    format!("attack.indicators[{}].tier", i),
+                    format!("indicator.tier must be a valid Tier value, got '{}'", tier),
+                ));
             }
         }
     }

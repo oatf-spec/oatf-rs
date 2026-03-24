@@ -656,6 +656,9 @@ pub struct Indicator {
     /// Semantic/intent-based detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic: Option<SemanticMatch>,
+    /// Outcome tier this indicator detects (§6.5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
     /// Confidence percentage (0–100) for this indicator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<i64>,
@@ -990,6 +993,9 @@ pub struct AttackVerdict {
     pub attack_id: Option<String>,
     /// Overall attack result.
     pub result: AttackResult,
+    /// Highest tier among matched indicators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tier: Option<Tier>,
     /// Individual indicator verdicts.
     pub indicator_verdicts: Vec<IndicatorVerdict>,
     /// Summary counts of indicator results.

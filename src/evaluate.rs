@@ -263,16 +263,27 @@ fn make_verdict(id: String, result: IndicatorResult, evidence: Option<String>) -
 fn build_attack_verdict(
     attack_id: Option<String>,
     result: AttackResult,
+    max_tier: Option<Tier>,
     indicator_verdicts: Vec<IndicatorVerdict>,
     evaluation_summary: EvaluationSummary,
 ) -> AttackVerdict {
     AttackVerdict {
         attack_id,
         result,
+        max_tier,
         indicator_verdicts,
         evaluation_summary,
         timestamp: Some(now_iso8601()),
         source: None,
+    }
+}
+
+fn parse_tier(s: &str) -> Option<Tier> {
+    match s {
+        "ingested" => Some(Tier::Ingested),
+        "local_action" => Some(Tier::LocalAction),
+        "boundary_breach" => Some(Tier::BoundaryBreach),
+        _ => None,
     }
 }
 
@@ -524,6 +535,7 @@ pub fn compute_verdict(
             return build_attack_verdict(
                 attack.id.clone(),
                 AttackResult::Error,
+                None,
                 vec![],
                 EvaluationSummary {
                     matched: 0,
@@ -577,6 +589,7 @@ pub fn compute_verdict(
         return build_attack_verdict(
             attack.id.clone(),
             AttackResult::Error,
+            None,
             collected_verdicts,
             EvaluationSummary {
                 matched,
@@ -610,9 +623,31 @@ pub fn compute_verdict(
         }
     };
 
+    // Compute max_tier: highest tier among matched indicators (§6.5).
+    // Absent when result is not_exploited or no matched indicator has a tier.
+    let max_tier = if result == AttackResult::NotExploited {
+        None
+    } else {
+        let mut best: Option<Tier> = None;
+        for indicator in indicators {
+            let ind_id = indicator.id.as_deref().unwrap_or("");
+            let is_matched = indicator_verdicts
+                .get(ind_id)
+                .is_some_and(|v| v.result == IndicatorResult::Matched);
+            if is_matched && let Some(tier) = indicator.tier.as_deref().and_then(parse_tier) {
+                best = Some(match best {
+                    Some(prev) => prev.max(tier),
+                    None => tier,
+                });
+            }
+        }
+        best
+    };
+
     build_attack_verdict(
         attack.id.clone(),
         result,
+        max_tier,
         collected_verdicts,
         EvaluationSummary {
             matched,

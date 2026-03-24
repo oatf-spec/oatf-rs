@@ -19,6 +19,7 @@ fn attack_with_indicators(logic: CorrelationLogic, indicator_ids: &[&str]) -> At
             pattern: None,
             expression: None,
             semantic: None,
+            tier: None,
             confidence: None,
             severity: None,
             false_positives: None,

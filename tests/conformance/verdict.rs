@@ -28,6 +28,8 @@ struct VerdictInput {
 #[derive(Debug, serde::Deserialize)]
 struct VerdictIndicator {
     id: String,
+    #[serde(default)]
+    tier: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -40,6 +42,8 @@ struct VerdictEntry {
 #[derive(Debug, serde::Deserialize)]
 struct VerdictExpected {
     result: String,
+    #[serde(default)]
+    max_tier: Option<String>,
     #[serde(default)]
     evaluation_summary: Option<EvalSummaryExpected>,
 }
@@ -96,6 +100,7 @@ fn run_verdict_suite(filename: &str) {
                 pattern: None,
                 expression: None,
                 semantic: None,
+                tier: i.tier.clone(),
                 confidence: None,
                 severity: None,
                 false_positives: None,
@@ -178,16 +183,25 @@ fn run_verdict_suite(filename: &str) {
             None => true,
         };
 
-        if result_ok && summary_ok {
+        let actual_tier_str = verdict.max_tier.as_ref().map(|t| match t {
+            oatf::enums::Tier::Ingested => "ingested",
+            oatf::enums::Tier::LocalAction => "local_action",
+            oatf::enums::Tier::BoundaryBreach => "boundary_breach",
+        });
+        let tier_ok = case.expected.max_tier.as_deref() == actual_tier_str;
+
+        if result_ok && summary_ok && tier_ok {
             passed += 1;
         } else {
             eprintln!(
-                "  FAIL [{}] {}: expected result={} summary={:?}, got result={} summary=matched={} not_matched={} error={} skipped={}",
+                "  FAIL [{}] {}: expected result={} max_tier={:?} summary={:?}, got result={} max_tier={:?} summary=matched={} not_matched={} error={} skipped={}",
                 case.id,
                 case.name,
                 case.expected.result,
+                case.expected.max_tier,
                 case.expected.evaluation_summary,
                 result_str,
+                actual_tier_str,
                 verdict.evaluation_summary.matched,
                 verdict.evaluation_summary.not_matched,
                 verdict.evaluation_summary.error,

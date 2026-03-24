@@ -214,3 +214,17 @@ pub enum IndicatorMethod {
     /// Semantic/intent-based detection.
     Semantic,
 }
+
+/// Outcome tier classifying how far an attack progressed (§6.5).
+///
+/// Variants are ordered by severity: `Ingested < LocalAction < BoundaryBreach`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier {
+    /// T1: payload entered the model's context but no tool was weaponized.
+    Ingested,
+    /// T2: model weaponized a tool but blast radius remained internal.
+    LocalAction,
+    /// T3: data, control, or traffic crossed a trust boundary.
+    BoundaryBreach,
+}
