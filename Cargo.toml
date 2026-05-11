@@ -19,7 +19,7 @@ cel-eval = ["cel-validate"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
-serde-saphyr = "0.0.21"
+serde-saphyr = "0.0.26"
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 indexmap = { version = "2", features = ["serde"] }
 regex = "1.12.3"
@@ -28,5 +28,5 @@ serde_json_path = "0.7.2"
 
 [dev-dependencies]
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
-serde-saphyr = "0.0.21"
+serde-saphyr = "0.0.26"
 proptest = "1.10.0"
